@@ -1,0 +1,130 @@
+package configs
+
+import (
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/spf13/viper"
+)
+
+// Config holds all runtime configuration for the application.
+type Config struct {
+	TelegramToken  string
+	AllowedUserIDs []int64
+	OpenAIAPIKey   string
+	Workspace      string
+}
+
+// Load resolves config with the following priority (highest → lowest):
+//  1. Environment variables
+//  2. .env file in cwd
+//  3. ~/.axle/credentials.json  (persistent local store)
+//  4. Interactive terminal prompt (when required fields are still missing)
+//
+// After any interactive prompt, values are saved to ~/.axle/credentials.json
+// so subsequent runs start without prompts.
+func Load() (*Config, error) {
+	// --- Viper: env vars + optional .env file ---
+	viper.SetConfigFile(".env")
+	viper.SetConfigType("env")
+	viper.AutomaticEnv()
+	viper.SetDefault("WORKSPACE", ".")
+	_ = viper.ReadInConfig() // .env is optional
+
+	// --- Persistent store ---
+	stored, err := loadStoredCreds()
+	if err != nil {
+		slog.Warn("無法讀取本地憑證，將重新設定", "error", err)
+		stored = &storedCreds{}
+	}
+
+	// --- Merge (env/viper wins over stored) ---
+	telegramToken := firstNonEmpty(viper.GetString("TELEGRAM_TOKEN"), stored.TelegramToken)
+	allowedRaw := firstNonEmpty(viper.GetString("ALLOWED_USER_IDS"), stored.AllowedUserIDs)
+	openAIKey := firstNonEmpty(viper.GetString("OPENAI_API_KEY"), stored.OpenAIAPIKey)
+	workspace := firstNonEmpty(viper.GetString("WORKSPACE"), stored.Workspace, ".")
+
+	// --- Interactive prompt for missing required fields ---
+	needsSave := false
+
+	if telegramToken == "" {
+		fmt.Println("\n🤖 Axle 首次設定，請提供必要的憑證：")
+		telegramToken = promptRequired("Telegram Bot Token", "從 @BotFather 取得")
+		stored.TelegramToken = telegramToken
+		needsSave = true
+	}
+
+	if allowedRaw == "" {
+		allowedRaw = promptRequired(
+			"允許的 Telegram User ID",
+			"可用逗號分隔多個 ID，從 @userinfobot 取得自己的 ID",
+		)
+		stored.AllowedUserIDs = allowedRaw
+		needsSave = true
+	}
+
+	if openAIKey == "" {
+		openAIKey = promptOptional("OpenAI API Key", "sk-... (若不使用 OpenAI 可略過)", "")
+		if openAIKey != "" {
+			stored.OpenAIAPIKey = openAIKey
+			needsSave = true
+		}
+	}
+
+	// --- Persist to ~/.axle/credentials.json ---
+	if needsSave {
+		stored.Workspace = workspace
+		if err := saveStoredCreds(stored); err != nil {
+			slog.Warn("⚠ 憑證儲存失敗，下次啟動需重新輸入", "error", err)
+		} else {
+			path, _ := CredsFilePath()
+			slog.Info("✅ 憑證已儲存", "path", path)
+		}
+	}
+
+	// --- Parse user IDs ---
+	ids, err := parseUserIDs(allowedRaw)
+	if err != nil {
+		return nil, fmt.Errorf("解析 ALLOWED_USER_IDS 失敗: %w", err)
+	}
+
+	return &Config{
+		TelegramToken:  telegramToken,
+		AllowedUserIDs: ids,
+		OpenAIAPIKey:   openAIKey,
+		Workspace:      workspace,
+	}, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func parseUserIDs(raw string) ([]int64, error) {
+	if raw == "" {
+		return nil, fmt.Errorf("User ID 不可為空（安全要求）")
+	}
+	parts := strings.Split(raw, ",")
+	ids := make([]int64, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		var id int64
+		if _, err := fmt.Sscanf(p, "%d", &id); err != nil {
+			return nil, fmt.Errorf("無效的 User ID: %q", p)
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("User ID 不可為空（安全要求）")
+	}
+	return ids, nil
+}
