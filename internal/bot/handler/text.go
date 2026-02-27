@@ -27,7 +27,8 @@ func (h *Hub) HandleText(c tele.Context) error {
 		switch s.Mode {
 		case app.ModeAwaitReadPath,
 			app.ModeAwaitWebSearch, app.ModeAwaitWebURL,
-			app.ModeAwaitProjectPath:
+			app.ModeAwaitProjectPath,
+			app.ModeAwaitListPath, app.ModeAwaitSearchQuery:
 			s.Mode = app.ModeIdle // consume: next message starts fresh
 		case app.ModeAwaitCopilotPrompt:
 			// Stay in Copilot session — mode remains ModeAwaitCopilotPrompt
@@ -38,6 +39,23 @@ func (h *Hub) HandleText(c tele.Context) error {
 			s.Mode = app.ModeAwaitWriteContent
 			s.PendingPath = text
 		case app.ModeAwaitWriteContent:
+			s.Mode = app.ModeIdle
+		case app.ModeAwaitGitCommitMsg:
+			s.Mode = app.ModeIdle
+			s.PendingCmd = text
+		case app.ModeAwaitSubAgentName:
+			s.Mode = app.ModeAwaitSubAgentTask
+			s.PendingAgent = text
+		case app.ModeAwaitSubAgentTask:
+			s.Mode = app.ModeIdle
+		case app.ModeAwaitSchedName:
+			s.Mode = app.ModeAwaitSchedInterval
+			s.PendingSchedName = text
+		case app.ModeAwaitSchedInterval:
+			s.Mode = app.ModeAwaitSchedCommand
+			s.PendingSchedCmd = "" // interval stored in PendingCmd temporarily
+			s.PendingCmd = text
+		case app.ModeAwaitSchedCommand:
 			s.Mode = app.ModeIdle
 		}
 	})
@@ -77,6 +95,30 @@ func (h *Hub) HandleText(c tele.Context) error {
 
 	case app.ModeAwaitProjectPath:
 		return h.handleProjectPathInput(c, text)
+
+	case app.ModeAwaitListPath:
+		return h.execListDir(c, text)
+
+	case app.ModeAwaitSearchQuery:
+		return h.execSearchCode(c, text)
+
+	case app.ModeAwaitGitCommitMsg:
+		return h.showGitCommitConfirm(c, text)
+
+	case app.ModeAwaitSubAgentName:
+		return c.Send("📝 請輸入子代理的任務描述：")
+
+	case app.ModeAwaitSubAgentTask:
+		return h.execCreateSubAgent(c, snap.PendingAgent, text)
+
+	case app.ModeAwaitSchedName:
+		return c.Send("⏱ 請輸入執行間隔（分鐘）：")
+
+	case app.ModeAwaitSchedInterval:
+		return c.Send("⚡ 請輸入要執行的 Shell 指令：")
+
+	case app.ModeAwaitSchedCommand:
+		return h.execCreateSchedule(c, snap.PendingSchedName, snap.PendingCmd, text)
 
 	default:
 		return h.sendMenu(c, "💡 請選擇操作")
@@ -264,4 +306,137 @@ func (h *Hub) handleProjectPathInput(c tele.Context, input string) error {
 	h.Sessions.Update(userID, func(s *app.UserSession) { s.ActiveWorkspace = absPath })
 	slog.Info("📂 工作目錄已切換", "workspace", absPath, "user_id", userID)
 	return h.sendMenu(c, fmt.Sprintf("✅ 工作目錄已切換至：`%s`", absPath))
+}
+
+// ── Directory listing ─────────────────────────────────────────────────────────
+
+// execListDir lists directory contents in tree format.
+func (h *Hub) execListDir(c tele.Context, relPath string) error {
+	slog.Info("📂 目錄瀏覽", "path", relPath, "user_id", c.Sender().ID)
+
+	result, err := skill.ListDir(context.Background(), h.workspaceFor(c.Sender().ID), relPath, 3)
+	if err != nil {
+		return h.sendMenu(c, "❌ "+err.Error())
+	}
+
+	chunks := skill.SplitMessage("```\n" + result + "\n```")
+	for i, chunk := range chunks {
+		if i == len(chunks)-1 {
+			return c.Send(chunk, MainMenu, tele.ModeMarkdown)
+		}
+		c.Send(chunk, tele.ModeMarkdown)
+	}
+	return nil
+}
+
+// ── Code search ───────────────────────────────────────────────────────────────
+
+// execSearchCode performs recursive code search.
+func (h *Hub) execSearchCode(c tele.Context, pattern string) error {
+	slog.Info("🔎 搜尋代碼", "pattern", pattern, "user_id", c.Sender().ID)
+	c.Send("🔎 搜尋中...")
+
+	results, err := skill.SearchCode(context.Background(), h.workspaceFor(c.Sender().ID), pattern)
+	if err != nil {
+		return h.sendMenu(c, "❌ 搜尋失敗："+err.Error())
+	}
+
+	text := skill.FormatSearchResults(pattern, results)
+	chunks := skill.SplitMessage(text)
+	for i, chunk := range chunks {
+		if i == len(chunks)-1 {
+			return c.Send(chunk, MainMenu, tele.ModeMarkdown)
+		}
+		c.Send(chunk, tele.ModeMarkdown)
+	}
+	return nil
+}
+
+// ── Git operations ────────────────────────────────────────────────────────────
+
+// showGitCommitConfirm shows commit message confirmation.
+func (h *Hub) showGitCommitConfirm(c tele.Context, msg string) error {
+	slog.Info("🔀 Git commit 確認", "msg", msg, "user_id", c.Sender().ID)
+	return c.Send(
+		fmt.Sprintf("🚀 *Git Commit + Push*\n\n提交訊息：\n```\n%s\n```\n\n⚠️ 此操作將 `git add -A` + `commit` + `push`\n確認執行？", msg),
+		GitCommitMenu,
+		tele.ModeMarkdown,
+	)
+}
+
+// ── Sub-agent creation ────────────────────────────────────────────────────────
+
+// execCreateSubAgent creates and runs a sub-agent.
+func (h *Hub) execCreateSubAgent(c tele.Context, name, task string) error {
+	userID := c.Sender().ID
+	slog.Info("👥 建立子代理", "name", name, "task", task, "user_id", userID)
+
+	if h.SubAgents == nil {
+		return h.sendMenu(c, "⚠️ 子代理系統未初始化")
+	}
+
+	sess := h.Sessions.GetCopy(userID)
+	model := sess.SelectedModel
+	if model == "" {
+		model = skill.DefaultModel
+	}
+
+	ws := h.workspaceFor(userID)
+	agent, ctx := h.SubAgents.Create(userID, name, task, model, ws)
+	chat := c.Chat()
+
+	c.Send(fmt.Sprintf("🤖 子代理 `%s` 已建立\n任務：%s\n模型：`%s`\n⏳ 執行中...", agent.ID, task, model), tele.ModeMarkdown)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("💥 子代理 panic", "id", agent.ID, "recover", r)
+				h.SubAgents.Fail(agent.ID, fmt.Sprintf("panic: %v", r))
+				h.Bot.Send(chat, fmt.Sprintf("💥 子代理 `%s` 異常中止", agent.ID), MainMenu)
+			}
+		}()
+
+		chunks, err := skill.RunCopilot(ctx, ws, model, task)
+		if err != nil {
+			h.SubAgents.Fail(agent.ID, err.Error())
+			h.Bot.Send(chat, fmt.Sprintf("❌ 子代理 `%s` 失敗：%s", agent.ID, err.Error()), MainMenu)
+			return
+		}
+
+		result := ""
+		for _, ch := range chunks {
+			result += ch
+		}
+		h.SubAgents.Complete(agent.ID, result)
+
+		msg := fmt.Sprintf("✅ 子代理 `%s` 完成\n\n%s", agent.ID, result)
+		msgChunks := skill.SplitMessage(msg)
+		h.sendChunks(chat, msgChunks)
+	}()
+
+	return nil
+}
+
+// ── Schedule creation ─────────────────────────────────────────────────────────
+
+// execCreateSchedule creates a new scheduled task.
+func (h *Hub) execCreateSchedule(c tele.Context, name, intervalStr, command string) error {
+	slog.Info("⏰ 建立排程", "name", name, "interval", intervalStr, "cmd", command, "user_id", c.Sender().ID)
+
+	if h.Scheduler == nil {
+		return h.sendMenu(c, "⚠️ 排程系統未初始化")
+	}
+
+	interval := 0
+	fmt.Sscanf(intervalStr, "%d", &interval)
+	if interval <= 0 {
+		return h.sendMenu(c, "❌ 間隔必須為正整數（分鐘）")
+	}
+
+	sched, err := h.Scheduler.Add(name, command, interval)
+	if err != nil {
+		return h.sendMenu(c, "❌ "+err.Error())
+	}
+
+	return h.sendMenu(c, fmt.Sprintf("✅ 排程已建立\n\n• ID：`%s`\n• 名稱：%s\n• 指令：`%s`\n• 間隔：每 %d 分鐘", sched.ID, sched.Name, sched.Command, sched.Interval))
 }

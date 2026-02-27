@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/garyellow/axle/internal/app"
 	"github.com/garyellow/axle/internal/bot/skill"
@@ -81,12 +84,40 @@ func (h *Hub) HandleStatus(c tele.Context) error {
 		wsLabel += "（預設）"
 	}
 
+	// Sub-agent count
+	agentCount := 0
+	if h.SubAgents != nil {
+		agentCount = h.SubAgents.RunningCount(c.Sender().ID)
+	}
+
+	// Memory count
+	memCount := 0
+	if h.Memory != nil {
+		memCount = h.Memory.Count(c.Sender().ID)
+	}
+
+	// Plugin count
+	pluginCount := 0
+	if h.Plugins != nil {
+		pluginCount = h.Plugins.Count()
+	}
+
+	// Schedule count
+	schedCount := 0
+	if h.Scheduler != nil {
+		schedCount = len(h.Scheduler.List())
+	}
+
 	return c.Send(fmt.Sprintf(
 		"📊 *系統狀態*\n\n"+
 			"• 任務狀態：%s\n"+
 			"• 選定模型：`%s`\n"+
-			"• Workspace：`%s`",
-		taskStatus, model, wsLabel,
+			"• Workspace：`%s`\n"+
+			"• 對話記憶：%d 筆\n"+
+			"• 子代理：%d 個執行中\n"+
+			"• 擴充技能：%d 個\n"+
+			"• 排程任務：%d 個",
+		taskStatus, model, wsLabel, memCount, agentCount, pluginCount, schedCount,
 	), MainMenu, tele.ModeMarkdown)
 }
 
@@ -369,4 +400,441 @@ func (h *Hub) HandleCopilotExit(c tele.Context) error {
 		s.Mode = app.ModeIdle
 	})
 	return h.sendMenu(c, "🔧 已返回主選單")
+}
+
+// ── Directory listing button ──────────────────────────────────────────────────
+
+// HandleListDirBtn sets session to await directory path input.
+func (h *Hub) HandleListDirBtn(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🔘 選單: 目錄瀏覽", "user_id", userID)
+	_ = c.Respond()
+	h.Sessions.Update(userID, func(s *app.UserSession) { s.Mode = app.ModeAwaitListPath })
+	return c.Send("📂 *目錄瀏覽*\n\n請輸入相對路徑（留空或輸入 `.` 為根目錄）\n範例：`cmd/axle`", tele.ModeMarkdown)
+}
+
+// ── Code search button ────────────────────────────────────────────────────────
+
+// HandleSearchBtn sets session to await search query input.
+func (h *Hub) HandleSearchBtn(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🔘 選單: 搜尋代碼", "user_id", userID)
+	_ = c.Respond()
+	h.Sessions.Update(userID, func(s *app.UserSession) { s.Mode = app.ModeAwaitSearchQuery })
+	return c.Send("🔎 *搜尋代碼*\n\n請輸入搜尋關鍵字（不區分大小寫）\n範例：`func main`", tele.ModeMarkdown)
+}
+
+// ── Git operations ────────────────────────────────────────────────────────────
+
+// HandleGitBtn shows the Git operations submenu.
+func (h *Hub) HandleGitBtn(c tele.Context) error {
+	slog.Info("🔘 選單: Git 操作", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	return c.Send("🔀 *Git 操作*\n\n請選擇操作：", GitMenu, tele.ModeMarkdown)
+}
+
+// HandleGitStatus runs git status.
+func (h *Hub) HandleGitStatus(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🔀 Git Status", "user_id", userID)
+	_ = c.Respond()
+
+	result, err := skill.GitStatus(context.Background(), h.workspaceFor(userID))
+	if err != nil {
+		return c.Send("❌ "+err.Error(), GitMenu)
+	}
+	chunks := skill.SplitMessage("📊 *Git Status*\n\n```\n" + result + "\n```")
+	for i, chunk := range chunks {
+		if i == len(chunks)-1 {
+			return c.Send(chunk, GitMenu, tele.ModeMarkdown)
+		}
+		c.Send(chunk, tele.ModeMarkdown)
+	}
+	return nil
+}
+
+// HandleGitDiff runs git diff (unstaged).
+func (h *Hub) HandleGitDiff(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🔀 Git Diff", "user_id", userID)
+	_ = c.Respond()
+
+	result, err := skill.GitDiff(context.Background(), h.workspaceFor(userID), false)
+	if err != nil {
+		return c.Send("❌ "+err.Error(), GitMenu)
+	}
+	chunks := skill.SplitMessage("📝 *Git Diff (Unstaged)*\n\n```diff\n" + result + "\n```")
+	for i, chunk := range chunks {
+		if i == len(chunks)-1 {
+			return c.Send(chunk, GitMenu, tele.ModeMarkdown)
+		}
+		c.Send(chunk, tele.ModeMarkdown)
+	}
+	return nil
+}
+
+// HandleGitDiffStaged runs git diff --cached (staged).
+func (h *Hub) HandleGitDiffStaged(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🔀 Git Diff Staged", "user_id", userID)
+	_ = c.Respond()
+
+	result, err := skill.GitDiff(context.Background(), h.workspaceFor(userID), true)
+	if err != nil {
+		return c.Send("❌ "+err.Error(), GitMenu)
+	}
+	chunks := skill.SplitMessage("📦 *Git Diff (Staged)*\n\n```diff\n" + result + "\n```")
+	for i, chunk := range chunks {
+		if i == len(chunks)-1 {
+			return c.Send(chunk, GitMenu, tele.ModeMarkdown)
+		}
+		c.Send(chunk, tele.ModeMarkdown)
+	}
+	return nil
+}
+
+// HandleGitLog runs git log --oneline.
+func (h *Hub) HandleGitLog(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🔀 Git Log", "user_id", userID)
+	_ = c.Respond()
+
+	result, err := skill.GitLog(context.Background(), h.workspaceFor(userID), 15)
+	if err != nil {
+		return c.Send("❌ "+err.Error(), GitMenu)
+	}
+	chunks := skill.SplitMessage("📜 *Git Log (最近 15 筆)*\n\n```\n" + result + "\n```")
+	for i, chunk := range chunks {
+		if i == len(chunks)-1 {
+			return c.Send(chunk, GitMenu, tele.ModeMarkdown)
+		}
+		c.Send(chunk, tele.ModeMarkdown)
+	}
+	return nil
+}
+
+// HandleGitCommitPush enters commit message input mode.
+func (h *Hub) HandleGitCommitPush(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🔀 Git Commit+Push", "user_id", userID)
+	_ = c.Respond()
+	h.Sessions.Update(userID, func(s *app.UserSession) { s.Mode = app.ModeAwaitGitCommitMsg })
+	return c.Send("🚀 *Git Commit + Push*\n\n請輸入 commit 訊息：", tele.ModeMarkdown)
+}
+
+// HandleGitCommitConfirm executes git add -A + commit + push.
+func (h *Hub) HandleGitCommitConfirm(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Warn("🚀 確認 Git Commit+Push", "user_id", userID)
+	_ = c.Respond()
+
+	var pendingMsg string
+	h.Sessions.Update(userID, func(s *app.UserSession) {
+		pendingMsg = s.PendingCmd
+		s.Mode = app.ModeIdle
+		s.PendingCmd = ""
+	})
+
+	if pendingMsg == "" {
+		return h.sendMenu(c, "⚠️ 沒有待提交的訊息")
+	}
+
+	return h.RunExecTask(c, fmt.Sprintf("git add -A && git commit -m '%s' && git push",
+		strings.ReplaceAll(pendingMsg, "'", "'\\''")))
+}
+
+// HandleGitCommitCancel cancels the git commit.
+func (h *Hub) HandleGitCommitCancel(c tele.Context) error {
+	slog.Info("❌ 取消 Git Commit", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	h.Sessions.Reset(c.Sender().ID)
+	return c.Send("❌ Git 操作已取消", GitMenu)
+}
+
+// ── Sub-agent buttons ─────────────────────────────────────────────────────────
+
+// HandleSubAgentsBtn shows the sub-agent submenu.
+func (h *Hub) HandleSubAgentsBtn(c tele.Context) error {
+	slog.Info("🔘 選單: 子代理", "user_id", c.Sender().ID)
+	_ = c.Respond()
+
+	count := 0
+	if h.SubAgents != nil {
+		count = h.SubAgents.RunningCount(c.Sender().ID)
+	}
+
+	return c.Send(fmt.Sprintf("👥 *子代理系統*\n\n執行中的代理：%d\n\n請選擇操作：", count),
+		SubAgentMenu, tele.ModeMarkdown)
+}
+
+// HandleSubAgentCreate starts the sub-agent creation flow.
+func (h *Hub) HandleSubAgentCreate(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("👥 建立子代理", "user_id", userID)
+	_ = c.Respond()
+	h.Sessions.Update(userID, func(s *app.UserSession) { s.Mode = app.ModeAwaitSubAgentName })
+	return c.Send("👥 *建立子代理*\n\n請輸入代理名稱：\n範例：`前端審查員`", tele.ModeMarkdown)
+}
+
+// HandleSubAgentList lists all sub-agents for the user.
+func (h *Hub) HandleSubAgentList(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("👥 查看子代理清單", "user_id", userID)
+	_ = c.Respond()
+
+	if h.SubAgents == nil {
+		return c.Send("⚠️ 子代理系統未初始化", SubAgentMenu)
+	}
+
+	agents := h.SubAgents.List(userID)
+	if len(agents) == 0 {
+		return c.Send("📋 目前沒有任何子代理", SubAgentMenu)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📋 *子代理清單*\n\n")
+	for _, a := range agents {
+		elapsed := ""
+		if a.Status == app.SubAgentRunning {
+			elapsed = fmt.Sprintf(" (%.0fs)", time.Since(a.CreatedAt).Seconds())
+		}
+		sb.WriteString(fmt.Sprintf("• `%s` — %s %s%s\n  任務：%s\n\n",
+			a.ID, a.Name, a.Status.String(), elapsed, a.Task))
+	}
+
+	// Build dynamic cancel buttons for running agents
+	m := &tele.ReplyMarkup{}
+	var rows []tele.Row
+	for _, a := range agents {
+		if a.Status == app.SubAgentRunning {
+			rows = append(rows, m.Row(
+				m.Data(fmt.Sprintf("🛑 取消 %s", a.Name), "subagent_cancel", a.ID),
+			))
+		}
+	}
+	rows = append(rows, m.Row(m.Data("⬅️ 返回主選單", "back_main")))
+	m.Inline(rows...)
+
+	return c.Send(sb.String(), m, tele.ModeMarkdown)
+}
+
+// HandleSubAgentCancel cancels a specific sub-agent.
+func (h *Hub) HandleSubAgentCancel(c tele.Context) error {
+	_ = c.Respond()
+	args := c.Args()
+	if len(args) < 1 {
+		return c.Send("⚠️ 未指定代理 ID", SubAgentMenu)
+	}
+
+	agentID := args[0]
+	slog.Info("🛑 取消子代理", "id", agentID, "user_id", c.Sender().ID)
+
+	if h.SubAgents == nil || !h.SubAgents.Cancel(agentID) {
+		return c.Send("ℹ️ 該代理不在執行中或不存在", SubAgentMenu)
+	}
+	return c.Send(fmt.Sprintf("🛑 子代理 `%s` 已取消", agentID), MainMenu, tele.ModeMarkdown)
+}
+
+// ── Plugin buttons ────────────────────────────────────────────────────────────
+
+// HandlePluginsBtn shows the plugin list.
+func (h *Hub) HandlePluginsBtn(c tele.Context) error {
+	slog.Info("🔘 選單: 擴充技能", "user_id", c.Sender().ID)
+	_ = c.Respond()
+
+	if h.Plugins == nil {
+		return h.sendMenu(c, "⚠️ 插件系統未初始化")
+	}
+
+	plugins := h.Plugins.List()
+	if len(plugins) == 0 {
+		return c.Send("🧩 *擴充技能*\n\n目前沒有可用的插件\n\n將 YAML 插件放入 `~/.axle/plugins/` 目錄即可載入",
+			MainMenu, tele.ModeMarkdown)
+	}
+
+	m := &tele.ReplyMarkup{}
+	var rows []tele.Row
+	for i, p := range plugins {
+		label := fmt.Sprintf("🧩 %s", p.Name)
+		if p.Description != "" {
+			label = fmt.Sprintf("🧩 %s — %s", p.Name, p.Description)
+		}
+		// Truncate label for Telegram button (max ~64 bytes for data)
+		if len(label) > 40 {
+			label = label[:40] + "..."
+		}
+		rows = append(rows, m.Row(
+			m.Data(label, "plugin_exec", fmt.Sprintf("%d", i)),
+		))
+	}
+	rows = append(rows, m.Row(m.Data("🔄 重新載入", "plugin_reload")))
+	rows = append(rows, m.Row(m.Data("⬅️ 返回主選單", "back_main")))
+	m.Inline(rows...)
+
+	return c.Send(fmt.Sprintf("🧩 *擴充技能*（共 %d 個）\n\n請選擇要執行的插件：", len(plugins)),
+		m, tele.ModeMarkdown)
+}
+
+// HandlePluginExec executes a specific plugin.
+func (h *Hub) HandlePluginExec(c tele.Context) error {
+	_ = c.Respond()
+	args := c.Args()
+	if len(args) < 1 || h.Plugins == nil {
+		return h.sendMenu(c, "⚠️ 插件參數錯誤")
+	}
+
+	idx := 0
+	fmt.Sscanf(args[0], "%d", &idx)
+	plugin, ok := h.Plugins.Get(idx)
+	if !ok {
+		return h.sendMenu(c, "⚠️ 插件不存在")
+	}
+
+	slog.Info("🧩 執行插件", "name", plugin.Name, "user_id", c.Sender().ID)
+
+	// Safety check for plugin commands
+	level, reasons := skill.CheckCommandSafety(plugin.Command)
+	if level == skill.DangerBlocked {
+		return h.sendMenu(c, fmt.Sprintf("⛔ 插件指令被封鎖：%s", strings.Join(reasons, ", ")))
+	}
+
+	if plugin.Confirm || level == skill.DangerWarning {
+		h.Sessions.Update(c.Sender().ID, func(s *app.UserSession) {
+			s.Mode = app.ModeAwaitExecConfirm
+			s.PendingCmd = plugin.Command
+		})
+		warning := ""
+		if len(reasons) > 0 {
+			warning = fmt.Sprintf("\n⚠️ 風險：%s", strings.Join(reasons, ", "))
+		}
+		return c.Send(
+			fmt.Sprintf("🧩 *插件：%s*\n\n```bash\n%s\n```%s\n\n確認執行？", plugin.Name, plugin.Command, warning),
+			ExecMenu,
+			tele.ModeMarkdown,
+		)
+	}
+
+	// Direct execution
+	ws := h.Workspace
+	if plugin.UseWorkspace {
+		ws = h.workspaceFor(c.Sender().ID)
+	}
+
+	return h.RunExecTask(c, fmt.Sprintf("cd %s && %s", ws, plugin.Command))
+}
+
+// HandlePluginReload reloads plugins from disk.
+func (h *Hub) HandlePluginReload(c tele.Context) error {
+	slog.Info("🔄 重新載入插件", "user_id", c.Sender().ID)
+	_ = c.Respond()
+
+	if h.Plugins == nil {
+		return h.sendMenu(c, "⚠️ 插件系統未初始化")
+	}
+
+	if err := h.Plugins.Reload(); err != nil {
+		return h.sendMenu(c, "❌ 載入失敗："+err.Error())
+	}
+	return h.sendMenu(c, fmt.Sprintf("✅ 插件已重新載入（共 %d 個）", h.Plugins.Count()))
+}
+
+// ── Scheduler buttons ─────────────────────────────────────────────────────────
+
+// HandleSchedulerBtn shows the scheduler submenu.
+func (h *Hub) HandleSchedulerBtn(c tele.Context) error {
+	slog.Info("🔘 選單: 排程任務", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	return c.Send("⏰ *排程任務*\n\n請選擇操作：", SchedulerMenu, tele.ModeMarkdown)
+}
+
+// HandleSchedCreate starts the schedule creation flow.
+func (h *Hub) HandleSchedCreate(c tele.Context) error {
+	slog.Info("⏰ 建立排程", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	h.Sessions.Update(c.Sender().ID, func(s *app.UserSession) { s.Mode = app.ModeAwaitSchedName })
+	return c.Send("⏰ *建立排程*\n\n請輸入排程名稱：\n範例：`健康檢查`", tele.ModeMarkdown)
+}
+
+// HandleSchedList shows all schedules.
+func (h *Hub) HandleSchedList(c tele.Context) error {
+	slog.Info("⏰ 查看排程", "user_id", c.Sender().ID)
+	_ = c.Respond()
+
+	if h.Scheduler == nil {
+		return c.Send("⚠️ 排程系統未初始化", SchedulerMenu)
+	}
+
+	schedules := h.Scheduler.List()
+	if len(schedules) == 0 {
+		return c.Send("📋 目前沒有排程任務", SchedulerMenu)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📋 *排程清單*\n\n")
+	for _, s := range schedules {
+		status := "✅ 啟用"
+		if !s.Enabled {
+			status = "⏸ 停用"
+		}
+		sb.WriteString(fmt.Sprintf("• `%s` — %s %s\n  指令：`%s`\n  間隔：每 %d 分鐘\n\n",
+			s.ID, s.Name, status, s.Command, s.Interval))
+	}
+
+	// Build dynamic buttons
+	m := &tele.ReplyMarkup{}
+	var rows []tele.Row
+	for _, s := range schedules {
+		toggleLabel := "⏸ 停用"
+		if !s.Enabled {
+			toggleLabel = "▶️ 啟用"
+		}
+		rows = append(rows, m.Row(
+			m.Data(fmt.Sprintf("%s %s", toggleLabel, s.Name), "sched_toggle", s.ID),
+			m.Data(fmt.Sprintf("🗑 刪除 %s", s.Name), "sched_delete", s.ID),
+		))
+	}
+	rows = append(rows, m.Row(m.Data("⬅️ 返回主選單", "back_main")))
+	m.Inline(rows...)
+
+	return c.Send(sb.String(), m, tele.ModeMarkdown)
+}
+
+// HandleSchedDelete deletes a schedule.
+func (h *Hub) HandleSchedDelete(c tele.Context) error {
+	_ = c.Respond()
+	args := c.Args()
+	if len(args) < 1 || h.Scheduler == nil {
+		return h.sendMenu(c, "⚠️ 排程參數錯誤")
+	}
+
+	schedID := args[0]
+	slog.Info("🗑 刪除排程", "id", schedID, "user_id", c.Sender().ID)
+
+	if !h.Scheduler.Delete(schedID) {
+		return c.Send("ℹ️ 排程不存在", SchedulerMenu)
+	}
+	return h.sendMenu(c, fmt.Sprintf("✅ 排程 `%s` 已刪除", schedID))
+}
+
+// HandleSchedToggle toggles a schedule on/off.
+func (h *Hub) HandleSchedToggle(c tele.Context) error {
+	_ = c.Respond()
+	args := c.Args()
+	if len(args) < 1 || h.Scheduler == nil {
+		return h.sendMenu(c, "⚠️ 排程參數錯誤")
+	}
+
+	schedID := args[0]
+	slog.Info("⏰ 切換排程", "id", schedID, "user_id", c.Sender().ID)
+
+	enabled, ok := h.Scheduler.Toggle(schedID)
+	if !ok {
+		return c.Send("ℹ️ 排程不存在", SchedulerMenu)
+	}
+
+	status := "✅ 已啟用"
+	if !enabled {
+		status = "⏸ 已停用"
+	}
+	return h.sendMenu(c, fmt.Sprintf("⏰ 排程 `%s` %s", schedID, status))
 }

@@ -22,6 +22,11 @@ type Hub struct {
 	Sessions  *app.SessionManager
 	Bot       *tele.Bot
 	Workspace string
+	Memory    *app.MemoryStore
+	SubAgents *app.SubAgentManager
+	Plugins   *app.PluginManager
+	Scheduler *app.ScheduleManager
+	AllowedUserIDs []int64
 }
 
 // NewHub creates a Hub wired with the provided dependencies.
@@ -167,8 +172,20 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 		model = skill.DefaultModel
 	}
 
+	// Save user prompt to memory
+	if h.Memory != nil {
+		_ = h.Memory.Add(userID, "user", prompt, model)
+	}
+
+	// Build context from memory
+	contextPrefix := ""
+	if h.Memory != nil {
+		contextPrefix = h.Memory.BuildContext(userID, 10)
+	}
+
+	fullPrompt := contextPrefix + prompt
 	truncWarning := ""
-	if len(prompt) > skill.MaxPromptChars {
+	if len(fullPrompt) > skill.MaxPromptChars {
 		truncWarning = fmt.Sprintf("\n⚠️ 提示詞過長，已截斷至 %d 字元", skill.MaxPromptChars)
 	}
 
@@ -193,7 +210,7 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 		defer close(stopProg)
 		go h.progressReporter(chat, "Copilot", time.Now(), stopProg)
 
-		chunks, err := skill.RunCopilot(ctx, h.workspaceFor(userID), model, prompt)
+		chunks, err := skill.RunCopilot(ctx, h.workspaceFor(userID), model, fullPrompt)
 
 		switch {
 		case errors.Is(err, context.Canceled):
@@ -204,6 +221,14 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 			h.Bot.Send(chat, "❌ "+err.Error(), CopilotSessionMenu)
 		default:
 			slog.Info("✅ Copilot 任務完成", "chunks", len(chunks), "user_id", userID)
+			// Save assistant response to memory
+			if h.Memory != nil {
+				fullResp := ""
+				for _, ch := range chunks {
+					fullResp += ch
+				}
+				_ = h.Memory.Add(userID, "assistant", fullResp, model)
+			}
 			h.sendCopilotChunks(chat, chunks)
 		}
 	}()

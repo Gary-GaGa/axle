@@ -16,6 +16,14 @@ const (
 	ModeAwaitWebSearch        // Next text message = search query
 	ModeAwaitWebURL           // Next text message = URL to fetch
 	ModeAwaitProjectPath      // Next text message = absolute path for workspace switch
+	ModeAwaitListPath         // Next text message = directory path to list
+	ModeAwaitSearchQuery      // Next text message = code search keyword
+	ModeAwaitGitCommitMsg     // Next text message = git commit message
+	ModeAwaitSubAgentName     // Next text message = sub-agent name
+	ModeAwaitSubAgentTask     // Next text message = sub-agent task description
+	ModeAwaitSchedName        // Next text message = schedule name
+	ModeAwaitSchedInterval    // Next text message = schedule interval in minutes
+	ModeAwaitSchedCommand     // Next text message = schedule command
 )
 
 // UserSession holds per-user interaction state between messages.
@@ -25,6 +33,9 @@ type UserSession struct {
 	PendingPath     string // File path awaiting content (write flow)
 	SelectedModel   string // Chosen Copilot model
 	ActiveWorkspace string // User-selected workspace (empty = use default)
+	PendingAgent    string // Sub-agent name being created
+	PendingSchedName string // Schedule name being created
+	PendingSchedCmd  string // Schedule command being created
 }
 
 // SessionManager manages per-user sessions. Goroutine-safe.
