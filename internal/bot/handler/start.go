@@ -21,7 +21,7 @@ func (h *Hub) HandleStart(c tele.Context) error {
 			"當前模式：單兵作戰\n"+
 			"任務狀態："+status+"\n\n"+
 			"請選擇操作：",
-		MainMenu,
+		h.mm(c),
 		tele.ModeMarkdown,
 	)
 }

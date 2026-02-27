@@ -118,7 +118,7 @@ func (h *Hub) HandleStatus(c tele.Context) error {
 			"• 擴充技能：%d 個\n"+
 			"• 排程任務：%d 個",
 		taskStatus, model, wsLabel, memCount, agentCount, pluginCount, schedCount,
-	), MainMenu, tele.ModeMarkdown)
+	), h.mm(c), tele.ModeMarkdown)
 }
 
 // HandleCancelTask cancels the currently running task.
@@ -127,11 +127,11 @@ func (h *Hub) HandleCancelTask(c tele.Context) error {
 	_ = c.Respond()
 
 	if cancelled := h.Tasks.Cancel(); !cancelled {
-		return c.Send("ℹ️ 目前沒有正在執行的任務", MainMenu)
+		return c.Send("ℹ️ 目前沒有正在執行的任務", h.mm(c))
 	}
 	// Also reset session mode
 	h.Sessions.Reset(c.Sender().ID)
-	return c.Send("🛑 取消信號已發送，任務將停止...", MainMenu)
+	return c.Send("🛑 取消信號已發送，任務將停止...", h.mm(c))
 }
 
 // HandleCancel is the /cancel command (same as cancel button).
@@ -139,10 +139,10 @@ func (h *Hub) HandleCancel(c tele.Context) error {
 	slog.Info("🎯 /cancel", "user_id", c.Sender().ID)
 	if cancelled := h.Tasks.Cancel(); !cancelled {
 		h.Sessions.Reset(c.Sender().ID)
-		return c.Send("ℹ️ 目前沒有正在執行的任務", MainMenu)
+		return c.Send("ℹ️ 目前沒有正在執行的任務", h.mm(c))
 	}
 	h.Sessions.Reset(c.Sender().ID)
-	return c.Send("🛑 取消信號已發送，任務將停止...", MainMenu)
+	return c.Send("🛑 取消信號已發送，任務將停止...", h.mm(c))
 }
 
 // ── Exec confirm/cancel buttons ───────────────────────────────────────────────
@@ -259,7 +259,7 @@ func (h *Hub) HandleModelSelect(c tele.Context) error {
 		})
 		return c.Send(
 			fmt.Sprintf("✅ 全局模型已設定：`%s`\n\n後續所有 Copilot 操作都會使用此模型。", model),
-			MainMenu,
+			h.mm(c),
 			tele.ModeMarkdown,
 		)
 	}
@@ -632,7 +632,7 @@ func (h *Hub) HandleSubAgentCancel(c tele.Context) error {
 	if h.SubAgents == nil || !h.SubAgents.Cancel(agentID) {
 		return c.Send("ℹ️ 該代理不在執行中或不存在", SubAgentMenu)
 	}
-	return c.Send(fmt.Sprintf("🛑 子代理 `%s` 已取消", agentID), MainMenu, tele.ModeMarkdown)
+	return c.Send(fmt.Sprintf("🛑 子代理 `%s` 已取消", agentID), h.mm(c), tele.ModeMarkdown)
 }
 
 // ── Plugin buttons ────────────────────────────────────────────────────────────
@@ -649,7 +649,7 @@ func (h *Hub) HandlePluginsBtn(c tele.Context) error {
 	plugins := h.Plugins.List()
 	if len(plugins) == 0 {
 		return c.Send("🧩 *擴充技能*\n\n目前沒有可用的插件\n\n將 YAML 插件放入 `~/.axle/plugins/` 目錄即可載入",
-			MainMenu, tele.ModeMarkdown)
+			h.mm(c), tele.ModeMarkdown)
 	}
 
 	m := &tele.ReplyMarkup{}
@@ -837,4 +837,66 @@ func (h *Hub) HandleSchedToggle(c tele.Context) error {
 		status = "⏸ 已停用"
 	}
 	return h.sendMenu(c, fmt.Sprintf("⏰ 排程 `%s` %s", schedID, status))
+}
+
+// ── Extras toggle menu ────────────────────────────────────────────────────────
+
+// HandleExtrasBtn shows the extras toggle menu.
+func (h *Hub) HandleExtrasBtn(c tele.Context) error {
+	slog.Info("🔘 選單: 更多功能", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	return h.showExtrasMenu(c)
+}
+
+// HandleToggleExtra toggles a specific extra feature on/off in the main menu.
+func (h *Hub) HandleToggleExtra(c tele.Context) error {
+	_ = c.Respond()
+	args := c.Args()
+	if len(args) < 1 {
+		return h.sendMenu(c, "⚠️ 參數錯誤")
+	}
+
+	featureID := args[0]
+	userID := c.Sender().ID
+	slog.Info("🔘 切換功能", "feature", featureID, "user_id", userID)
+
+	h.Sessions.Update(userID, func(s *app.UserSession) {
+		if s.EnabledExtras == nil {
+			s.EnabledExtras = make(map[string]bool)
+		}
+		s.EnabledExtras[featureID] = !s.EnabledExtras[featureID]
+		if !s.EnabledExtras[featureID] {
+			delete(s.EnabledExtras, featureID)
+		}
+	})
+
+	return h.showExtrasMenu(c)
+}
+
+// showExtrasMenu builds and sends the extras toggle menu.
+func (h *Hub) showExtrasMenu(c tele.Context) error {
+	sess := h.Sessions.GetCopy(c.Sender().ID)
+	extras := sess.EnabledExtras
+
+	m := &tele.ReplyMarkup{}
+	var rows []tele.Row
+
+	for _, ef := range ExtraFeatures {
+		icon := "◻️"
+		if extras[ef.ID] {
+			icon = "✅"
+		}
+		rows = append(rows, m.Row(
+			m.Data(fmt.Sprintf("%s %s", icon, ef.Label), "toggle_extra", ef.ID),
+		))
+	}
+	rows = append(rows, m.Row(m.Data("⬅️ 返回主選單", "back_main")))
+	m.Inline(rows...)
+
+	enabledCount := len(extras)
+	return c.Send(
+		fmt.Sprintf("⚙️ *更多功能*\n\n點擊可將功能加入/移除主選單\n已啟用：%d 項", enabledCount),
+		m,
+		tele.ModeMarkdown,
+	)
 }

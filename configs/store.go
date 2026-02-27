@@ -14,7 +14,6 @@ const credsFileName = "credentials.json"
 type storedCreds struct {
 	TelegramToken  string `json:"telegram_token,omitempty"`
 	AllowedUserIDs string `json:"allowed_user_ids,omitempty"`
-	OpenAIAPIKey   string `json:"openai_api_key,omitempty"`
 	Workspace      string `json:"workspace,omitempty"`
 }
 

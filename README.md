@@ -2,22 +2,37 @@
 
 > 🔧 安全、本地的 Golang AI Agent — 透過 Telegram 控制你的開發工具。
 
-Axle 是一個運行在本機的 Telegram Bot，讓你隨時隨地透過手機或電腦的 Telegram 客戶端操控開發環境中的工具：讀寫代碼、執行指令、與 GitHub Copilot CLI 對話、搜尋網頁等。
+Axle 是一個運行在本機的 Telegram Bot，讓你隨時隨地透過手機或電腦的 Telegram 客戶端操控開發環境中的工具：讀寫代碼、執行指令、與 GitHub Copilot CLI 對話、搜尋網頁、管理 Git 倉庫等。所有 AI 功能透過 GitHub Copilot CLI 驅動，無需額外 API Key。
 
 ## ✨ 功能總覽
+
+### 預設功能（主選單常駐）
 
 | 功能 | 說明 |
 |------|------|
 | 📁 讀取代碼 | 讀取 workspace 內的檔案並格式化顯示 |
 | ✏️ 寫入檔案 | 在 workspace 內建立或覆寫檔案（含覆寫警告） |
-| ⚡ 執行指令 | 在 workspace 中執行 Shell 指令（需確認，含危險偵測） |
 | 🤖 Copilot 助手 | 與 GitHub Copilot CLI 持續對話，支援即時切換模型 |
-| 🔍 Web 搜尋 | 透過 DuckDuckGo 搜尋（無需 API Key） |
-| 🌐 Web 擷取 | 擷取任意 URL 的文字內容 |
+| ⚡ 執行指令 | 在 workspace 中執行 Shell 指令（需確認，含危險偵測） |
 | 🔄 切換模型 | 全局切換 Copilot 模型（兩步式：廠商 → 模型，含費率顯示） |
 | 📂 切換專案 | 動態切換工作目錄，支援多專案同時開發 |
 | 📊 系統狀態 | 查看任務狀態、選定模型、Workspace 路徑 |
 | 🛑 取消任務 | 中斷正在執行的任務 |
+
+### 擴充功能（可自行啟用，釘選至主選單）
+
+透過「➕ 更多功能」開關切換，啟用後會動態加入主選單：
+
+| 功能 | 說明 |
+|------|------|
+| 📂 目錄瀏覽 | 瀏覽 workspace 內的目錄結構 |
+| 🔎 搜尋代碼 | 在 workspace 中以關鍵字搜尋檔案內容 |
+| 🔍 Web 搜尋 | 透過 DuckDuckGo 搜尋（無需 API Key） |
+| 🌐 Web 擷取 | 擷取任意 URL 的文字內容 |
+| 🔀 Git 操作 | 查看 status / diff / log，一鍵 commit & push |
+| 🧩 擴充技能 | 載入自定義 YAML 技能插件 |
+| 👥 子代理 | 委派子代理執行獨立任務，含清單管理 |
+| ⏰ 排程任務 | Cron 排程自動執行 Shell 指令 |
 
 ## 🚀 快速開始
 
@@ -46,9 +61,8 @@ go build -o axle ./cmd/axle
 
 1. **Telegram Bot Token**（必填）
 2. **允許的 Telegram User ID**（必填，安全白名單）
-3. **OpenAI API Key**（選填）
 
-設定完成後憑證會儲存至 `~/.axle/credentials.json`（權限 `0600`），下次啟動自動載入。
+設定完成後憑證會儲存至 `~/.axle/credentials.json`（權限 `0600`），下次啟動自動載入。若憑證遺失會自動提示重新輸入。
 
 ### 環境變數（進階）
 
@@ -79,13 +93,15 @@ axle/
 ├── internal/
 │   ├── app/                   # 應用核心
 │   │   ├── taskmanager.go     # 單任務槽位 + Context 取消
-│   │   └── session.go         # 每用戶狀態機（Mode 路由）
+│   │   ├── session.go         # 每用戶狀態機（Mode 路由 + 擴充功能偏好）
+│   │   ├── plugin.go          # YAML 技能插件管理器
+│   │   └── scheduler.go       # Cron 排程引擎
 │   └── bot/
 │       ├── handler/           # Telegram Handler 層
-│       │   ├── hub.go         # Hub 結構（共用依賴 + 任務啟動器 + workspace helper）
-│       │   ├── menu.go        # 所有 InlineKeyboard 定義（含兩步式模型選擇）
+│       │   ├── hub.go         # Hub 結構（共用依賴 + 動態選單產生器）
+│       │   ├── menu.go        # 動態主選單 + 擴充功能切換 + 各子選單
 │       │   ├── start.go       # /start 指令
-│       │   ├── text.go        # 文字訊息路由器（含專案切換流程）
+│       │   ├── text.go        # 文字訊息路由器（含專案切換、子代理建立）
 │       │   └── callback.go    # 按鈕回呼處理器
 │       ├── middleware/
 │       │   └── auth.go        # 白名單 Auth 中間件（隱形模式）
@@ -96,7 +112,10 @@ axle/
 │           ├── exec.go        # Shell 執行（限時 + 輸出上限 1MB）
 │           ├── copilot.go     # Copilot CLI 呼叫器（5 分鐘超時）
 │           ├── safety.go      # 危險指令偵測（3 級制）
-│           └── web.go         # DuckDuckGo 搜尋 + URL 擷取
+│           ├── web.go         # DuckDuckGo 搜尋 + URL 擷取
+│           ├── listdir.go     # 目錄瀏覽（樹狀結構）
+│           ├── search.go      # 代碼搜尋（grep 風格）
+│           └── git.go         # Git 操作（status / diff / log / commit+push）
 ├── docs/                      # 文件
 ├── scripts/                   # 輔助腳本
 ├── .env.example               # 環境變數範本
@@ -111,6 +130,7 @@ axle/
 - **單一職責**：每個 `skill` 是獨立的純函式，不依賴 Telegram 框架
 - **併發安全**：所有共享狀態（TaskManager、SessionManager）使用 `sync.Mutex` / `sync.RWMutex`
 - **可測試性**：Skill 層僅依賴標準函式庫，可直接單元測試
+- **動態選單**：主選單根據用戶啟用的擴充功能動態生成
 
 ## 🔒 安全機制
 
@@ -163,7 +183,7 @@ Axle 支援在運行時動態切換工作目錄（Workspace），讓你在不重
 
 1. 在 Telegram 中對 Bot 發送 `/start`
 2. Bot 顯示主選單（Inline Keyboard）
-3. 點擊按鈕選擇功能
+3. 點擊按鈕選擇功能（或透過「➕ 更多功能」啟用額外功能）
 4. 依照提示輸入參數
 5. 等待結果回傳
 
@@ -173,6 +193,13 @@ Axle 支援在運行時動態切換工作目錄（Workspace），讓你在不重
 |------|------|
 | `/start` | 顯示主選單與任務狀態 |
 | `/cancel` | 取消目前執行中的任務 |
+
+### 擴充功能切換
+
+1. 點擊主選單「➕ 更多功能」
+2. 看到所有可選功能的開關清單（✅ 已啟用 / ⬜ 未啟用）
+3. 點擊切換開關
+4. 返回主選單後，已啟用功能的按鈕會出現在選單中
 
 ### Copilot 對話模式
 
@@ -190,11 +217,34 @@ Axle 支援在運行時動態切換工作目錄（Workspace），讓你在不重
 | 類別 | 模型 | 費率 |
 |------|------|------|
 | 免費 | gpt-5-mini, gpt-4.1 | 免費 |
-| 低倍 | claude-haiku-4.5 | 0.25x |
+| 低倍 | claude-haiku-4.5, gpt-5.1-codex-mini | 0.25x ~ 0.5x |
 | 標準 | claude-sonnet-4.6, claude-sonnet-4.5, claude-sonnet-4, gpt-5.1, gpt-5.2, gemini-3-pro-preview | 1x |
 | 中倍 | gpt-5.1-codex | 1.5x |
 | 高倍 | claude-opus-4.6, claude-opus-4.5, gpt-5.3-codex, gpt-5.2-codex, gpt-5.1-codex-max | 3x |
 | 旗艦 | claude-opus-4.6-fast | 33x |
+
+### Git 操作
+
+啟用「🔀 Git 操作」擴充後，可進行：
+- **Status** — 查看工作區狀態
+- **Diff** — 查看未暫存的變更
+- **Diff (Staged)** — 查看已暫存的變更
+- **Log** — 查看最近 10 筆提交記錄
+- **Commit & Push** — 一鍵提交並推送（需確認）
+
+### 排程任務
+
+啟用「⏰ 排程任務」擴充後，可建立 Cron 排程：
+- 支援標準 Cron 表達式（如 `*/5 * * * *`）
+- 排程持久化至 `~/.axle/schedules.json`
+- 可啟用/停用/刪除個別排程
+
+### 擴充技能（插件）
+
+啟用「🧩 擴充技能」擴充後，可載入 YAML 定義的自定義技能：
+- 技能檔案放置於 `~/.axle/plugins/`
+- 支援 shell 類型（執行指令）和 copilot 類型（AI 對話）
+- 首次使用會自動建立範例插件
 
 ## ⚙️ 防護與限制
 
@@ -238,17 +288,20 @@ go build -race -o axle ./cmd/axle
 # 靜態分析
 go vet ./...
 
+# 執行測試（含 race detector）
+go test -race ./internal/...
+
 # 直接運行
 go run ./cmd/axle
 ```
 
 ## 🗺️ Roadmap
 
-- [ ] 子代理委派系統（Sub-Agent Swarm）
 - [ ] 自我演進（Self-Evolution）— 透過對話自行修改代碼
 - [ ] LINE 通訊管道支援
-- [ ] 單元測試覆蓋率提升
+- [ ] Memory / Context 持久化
 - [ ] 多用戶各自獨立任務槽位
+- [ ] 圖片生成與分析
 
 ## License
 

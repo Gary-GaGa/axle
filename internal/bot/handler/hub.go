@@ -50,20 +50,31 @@ func (h *Hub) workspaceFor(userID int64) string {
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-// sendMenu sends a message with the main menu attached.
-func (h *Hub) sendMenu(c tele.Context, text string) error {
-	return c.Send(text, MainMenu)
+// mm returns the dynamic main menu for the current user.
+func (h *Hub) mm(c tele.Context) *tele.ReplyMarkup {
+	return BuildMainMenu(h.Sessions.GetCopy(c.Sender().ID).EnabledExtras)
 }
 
-// sendChunks sends multiple message chunks, attaching MainMenu to the last one.
+// mmFor returns the dynamic main menu for a specific user ID.
+func (h *Hub) mmFor(userID int64) *tele.ReplyMarkup {
+	return BuildMainMenu(h.Sessions.GetCopy(userID).EnabledExtras)
+}
+
+// sendMenu sends a message with the user's dynamic main menu attached.
+func (h *Hub) sendMenu(c tele.Context, text string) error {
+	return c.Send(text, h.mm(c))
+}
+
+// sendChunks sends multiple message chunks, attaching the user's main menu to the last one.
 // Includes a small delay between sends to avoid Telegram rate limits.
-func (h *Hub) sendChunks(chat tele.Recipient, chunks []string) {
+func (h *Hub) sendChunks(chat tele.Recipient, chunks []string, userID int64) {
+	menu := h.mmFor(userID)
 	for i, chunk := range chunks {
 		if i > 0 {
 			time.Sleep(chunkSendDelay)
 		}
 		if i == len(chunks)-1 {
-			h.Bot.Send(chat, chunk, MainMenu)
+			h.Bot.Send(chat, chunk, menu)
 		} else {
 			h.Bot.Send(chat, chunk)
 		}
@@ -110,7 +121,7 @@ func (h *Hub) tryStartTask(c tele.Context, name string) (ctx context.Context, do
 		c.Send(fmt.Sprintf(
 			"⚠️ 目前已有任務「%s」執行中（已耗時 %.0f 秒）\n\n請等待完成，或按下 🛑 取消任務",
 			taskName, elapsed.Seconds(),
-		), MainMenu)
+		), h.mm(c))
 		return nil, nil, false
 	}
 	return ctx, h.Tasks.Done, true
@@ -136,7 +147,7 @@ func (h *Hub) RunExecTask(c tele.Context, command string) error {
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("💥 Shell 任務 panic", "recover", r, "stack", string(debug.Stack()))
-				h.Bot.Send(chat, "💥 任務異常中止，請查看 Log", MainMenu)
+				h.Bot.Send(chat, "💥 任務異常中止，請查看 Log", h.mmFor(userID))
 			}
 		}()
 
@@ -149,13 +160,13 @@ func (h *Hub) RunExecTask(c tele.Context, command string) error {
 		switch {
 		case errors.Is(err, context.Canceled):
 			slog.Info("🛑 Shell 任務已取消", "user_id", userID)
-			h.Bot.Send(chat, "🛑 指令執行已取消", MainMenu)
+			h.Bot.Send(chat, "🛑 指令執行已取消", h.mmFor(userID))
 		case err != nil:
 			slog.Error("❌ Shell 任務失敗", "error", err)
-			h.Bot.Send(chat, "❌ "+err.Error(), MainMenu)
+			h.Bot.Send(chat, "❌ "+err.Error(), h.mmFor(userID))
 		default:
 			slog.Info("✅ Shell 任務完成", "user_id", userID)
-			h.sendChunks(chat, skill.SplitMessage("```\n"+out+"\n```"))
+			h.sendChunks(chat, skill.SplitMessage("```\n"+out+"\n```"), userID)
 		}
 	}()
 	return nil
@@ -202,7 +213,7 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("💥 Copilot 任務 panic", "recover", r, "stack", string(debug.Stack()))
-				h.Bot.Send(chat, "💥 任務異常中止，請查看 Log", MainMenu)
+				h.Bot.Send(chat, "💥 任務異常中止，請查看 Log", h.mmFor(userID))
 			}
 		}()
 
@@ -215,7 +226,7 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 		switch {
 		case errors.Is(err, context.Canceled):
 			slog.Info("🛑 Copilot 任務已取消", "user_id", userID)
-			h.Bot.Send(chat, "🛑 Copilot 任務已取消", MainMenu)
+			h.Bot.Send(chat, "🛑 Copilot 任務已取消", h.mmFor(userID))
 		case err != nil:
 			slog.Error("❌ Copilot 任務失敗", "error", err)
 			h.Bot.Send(chat, "❌ "+err.Error(), CopilotSessionMenu)

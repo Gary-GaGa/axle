@@ -137,7 +137,7 @@ func (h *Hub) execReadCode(c tele.Context, relPath string) error {
 	chunks := skill.SplitMessage(result)
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {
-			return c.Send(chunk, MainMenu, tele.ModeMarkdown)
+			return c.Send(chunk, h.mm(c), tele.ModeMarkdown)
 		}
 		c.Send(chunk, tele.ModeMarkdown)
 	}
@@ -155,7 +155,7 @@ func (h *Hub) showExecConfirm(c tele.Context, cmd string) error {
 		h.Sessions.Reset(c.Sender().ID)
 		return c.Send(
 			fmt.Sprintf("⛔ *指令被封鎖*\n\n偵測到極度危險操作：\n• %s\n\n此指令已被拒絕執行。", strings.Join(reasons, "\n• ")),
-			MainMenu,
+			h.mm(c),
 			tele.ModeMarkdown,
 		)
 
@@ -244,7 +244,7 @@ func (h *Hub) execWebSearch(c tele.Context, query string) error {
 		}
 		sb.WriteString("\n")
 	}
-	return c.Send(sb.String(), MainMenu, tele.ModeMarkdown)
+	return c.Send(sb.String(), h.mm(c), tele.ModeMarkdown)
 }
 
 // execWebFetch fetches a URL and displays extracted text content.
@@ -264,7 +264,7 @@ func (h *Hub) execWebFetch(c tele.Context, rawURL string) error {
 	chunks := skill.SplitMessage(header + text)
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {
-			return c.Send(chunk, MainMenu)
+			return c.Send(chunk, h.mm(c))
 		}
 		c.Send(chunk)
 	}
@@ -322,7 +322,7 @@ func (h *Hub) execListDir(c tele.Context, relPath string) error {
 	chunks := skill.SplitMessage("```\n" + result + "\n```")
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {
-			return c.Send(chunk, MainMenu, tele.ModeMarkdown)
+			return c.Send(chunk, h.mm(c), tele.ModeMarkdown)
 		}
 		c.Send(chunk, tele.ModeMarkdown)
 	}
@@ -345,7 +345,7 @@ func (h *Hub) execSearchCode(c tele.Context, pattern string) error {
 	chunks := skill.SplitMessage(text)
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {
-			return c.Send(chunk, MainMenu, tele.ModeMarkdown)
+			return c.Send(chunk, h.mm(c), tele.ModeMarkdown)
 		}
 		c.Send(chunk, tele.ModeMarkdown)
 	}
@@ -392,14 +392,14 @@ func (h *Hub) execCreateSubAgent(c tele.Context, name, task string) error {
 			if r := recover(); r != nil {
 				slog.Error("💥 子代理 panic", "id", agent.ID, "recover", r)
 				h.SubAgents.Fail(agent.ID, fmt.Sprintf("panic: %v", r))
-				h.Bot.Send(chat, fmt.Sprintf("💥 子代理 `%s` 異常中止", agent.ID), MainMenu)
+				h.Bot.Send(chat, fmt.Sprintf("💥 子代理 `%s` 異常中止", agent.ID), h.mmFor(userID))
 			}
 		}()
 
 		chunks, err := skill.RunCopilot(ctx, ws, model, task)
 		if err != nil {
 			h.SubAgents.Fail(agent.ID, err.Error())
-			h.Bot.Send(chat, fmt.Sprintf("❌ 子代理 `%s` 失敗：%s", agent.ID, err.Error()), MainMenu)
+			h.Bot.Send(chat, fmt.Sprintf("❌ 子代理 `%s` 失敗：%s", agent.ID, err.Error()), h.mmFor(userID))
 			return
 		}
 
@@ -411,7 +411,7 @@ func (h *Hub) execCreateSubAgent(c tele.Context, name, task string) error {
 
 		msg := fmt.Sprintf("✅ 子代理 `%s` 完成\n\n%s", agent.ID, result)
 		msgChunks := skill.SplitMessage(msg)
-		h.sendChunks(chat, msgChunks)
+		h.sendChunks(chat, msgChunks, userID)
 	}()
 
 	return nil

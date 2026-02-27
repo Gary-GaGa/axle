@@ -36,6 +36,7 @@ type UserSession struct {
 	PendingAgent    string // Sub-agent name being created
 	PendingSchedName string // Schedule name being created
 	PendingSchedCmd  string // Schedule command being created
+	EnabledExtras   map[string]bool // Optional features pinned to main menu
 }
 
 // SessionManager manages per-user sessions. Goroutine-safe.
@@ -86,5 +87,6 @@ func (sm *SessionManager) Reset(userID int64) {
 	}
 	model := s.SelectedModel
 	ws := s.ActiveWorkspace
-	*s = UserSession{SelectedModel: model, ActiveWorkspace: ws}
+	extras := s.EnabledExtras
+	*s = UserSession{SelectedModel: model, ActiveWorkspace: ws, EnabledExtras: extras}
 }

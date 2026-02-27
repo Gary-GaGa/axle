@@ -12,7 +12,6 @@ import (
 type Config struct {
 	TelegramToken  string
 	AllowedUserIDs []int64
-	OpenAIAPIKey   string
 	Workspace      string
 }
 
@@ -42,7 +41,6 @@ func Load() (*Config, error) {
 	// --- Merge (env/viper wins over stored) ---
 	telegramToken := firstNonEmpty(viper.GetString("TELEGRAM_TOKEN"), stored.TelegramToken)
 	allowedRaw := firstNonEmpty(viper.GetString("ALLOWED_USER_IDS"), stored.AllowedUserIDs)
-	openAIKey := firstNonEmpty(viper.GetString("OPENAI_API_KEY"), stored.OpenAIAPIKey)
 	workspace := firstNonEmpty(viper.GetString("WORKSPACE"), stored.Workspace, ".")
 
 	// --- Interactive prompt for missing required fields ---
@@ -62,14 +60,6 @@ func Load() (*Config, error) {
 		)
 		stored.AllowedUserIDs = allowedRaw
 		needsSave = true
-	}
-
-	if openAIKey == "" {
-		openAIKey = promptOptional("OpenAI API Key", "sk-... (若不使用 OpenAI 可略過)", "")
-		if openAIKey != "" {
-			stored.OpenAIAPIKey = openAIKey
-			needsSave = true
-		}
 	}
 
 	// --- Persist to ~/.axle/credentials.json ---
@@ -92,7 +82,6 @@ func Load() (*Config, error) {
 	return &Config{
 		TelegramToken:  telegramToken,
 		AllowedUserIDs: ids,
-		OpenAIAPIKey:   openAIKey,
 		Workspace:      workspace,
 	}, nil
 }
