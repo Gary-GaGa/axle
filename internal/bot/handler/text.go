@@ -25,6 +25,8 @@ func (h *Hub) HandleText(c tele.Context) error {
 	h.Sessions.Update(userID, func(s *app.UserSession) {
 		snap = *s // capture state before transition
 		switch s.Mode {
+		case app.ModeIdle:
+			s.Mode = app.ModeAwaitCopilotPrompt // NLP routing: enter copilot session
 		case app.ModeAwaitReadPath,
 			app.ModeAwaitWebSearch, app.ModeAwaitWebURL,
 			app.ModeAwaitProjectPath,
@@ -80,7 +82,9 @@ func (h *Hub) HandleText(c tele.Context) error {
 
 	switch snap.Mode {
 	case app.ModeIdle:
-		return h.sendMenu(c, "💡 請使用下方選單操作，或輸入 /start 顯示主選單")
+		// NLP routing: auto-forward to Copilot session
+		slog.Info("🧠 NLP 路由 → Copilot", "user_id", userID)
+		return h.RunCopilotTask(c, text, model)
 
 	case app.ModeAwaitReadPath:
 		return h.execReadCode(c, text)

@@ -175,7 +175,9 @@ func (h *Hub) RunExecTask(c tele.Context, command string) error {
 
 // ── Copilot task ──────────────────────────────────────────────────────────────
 
-// RunCopilotTask starts a Copilot CLI task in a background goroutine.
+// RunCopilotTask starts a Copilot CLI task with streaming output.
+// The response is progressively edited into a single Telegram message,
+// then split into multiple messages if the final result exceeds 4000 chars.
 func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 	userID := c.Sender().ID
 	chat := c.Chat()
@@ -207,7 +209,10 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 	}
 
 	slog.Info("🤖 啟動 Copilot 任務", "model", model, "user_id", userID)
-	c.Send(fmt.Sprintf("🤖 Copilot 任務已啟動（模型：`%s`）%s\n⏳ 執行中，請稍候...", model, truncWarning), tele.ModeMarkdown)
+
+	// Send initial streaming message
+	initText := fmt.Sprintf("🤖 Copilot（%s）%s\n⏳ 思考中...", model, truncWarning)
+	sentMsg, _ := h.Bot.Send(chat, initText)
 
 	go func() {
 		defer done()
@@ -218,30 +223,67 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 			}
 		}()
 
-		stopProg := make(chan struct{})
-		defer close(stopProg)
-		go h.progressReporter(chat, "Copilot", time.Now(), stopProg)
+		lastEdit := time.Now()
+		const streamEditInterval = 1500 * time.Millisecond
 
-		chunks, err := skill.RunCopilot(ctx, h.workspaceFor(userID), model, fullPrompt)
+		onUpdate := func(accumulated string) {
+			if time.Since(lastEdit) < streamEditInterval {
+				return
+			}
+			display := accumulated
+			if len(display) > 3800 {
+				display = display[:3800] + "\n\n⏳ 生成中..."
+			}
+			if sentMsg != nil {
+				edited, err := h.Bot.Edit(sentMsg, display)
+				if err == nil {
+					sentMsg = edited
+				}
+			}
+			lastEdit = time.Now()
+		}
+
+		result, err := skill.RunCopilotStream(ctx, h.workspaceFor(userID), model, fullPrompt, onUpdate)
 
 		switch {
 		case errors.Is(err, context.Canceled):
 			slog.Info("🛑 Copilot 任務已取消", "user_id", userID)
-			h.Bot.Send(chat, "🛑 Copilot 任務已取消", h.mmFor(userID))
+			if sentMsg != nil {
+				h.Bot.Edit(sentMsg, "🛑 Copilot 任務已取消", h.mmFor(userID))
+			} else {
+				h.Bot.Send(chat, "🛑 Copilot 任務已取消", h.mmFor(userID))
+			}
 		case err != nil:
 			slog.Error("❌ Copilot 任務失敗", "error", err)
-			h.Bot.Send(chat, "❌ "+err.Error(), CopilotSessionMenu)
-		default:
-			slog.Info("✅ Copilot 任務完成", "chunks", len(chunks), "user_id", userID)
-			// Save assistant response to memory
-			if h.Memory != nil {
-				fullResp := ""
-				for _, ch := range chunks {
-					fullResp += ch
-				}
-				_ = h.Memory.Add(userID, "assistant", fullResp, model)
+			if sentMsg != nil {
+				h.Bot.Edit(sentMsg, "❌ "+err.Error(), CopilotSessionMenu)
+			} else {
+				h.Bot.Send(chat, "❌ "+err.Error(), CopilotSessionMenu)
 			}
-			h.sendCopilotChunks(chat, chunks)
+		default:
+			slog.Info("✅ Copilot 任務完成", "len", len(result), "user_id", userID)
+			if h.Memory != nil {
+				_ = h.Memory.Add(userID, "assistant", result, model)
+			}
+
+			chunks := skill.SplitMessage(result)
+			if len(chunks) == 1 && sentMsg != nil {
+				// Single chunk: edit existing message with session menu
+				h.Bot.Edit(sentMsg, chunks[0], CopilotSessionMenu)
+			} else {
+				// Multiple chunks: edit first, send rest
+				if sentMsg != nil {
+					h.Bot.Edit(sentMsg, chunks[0])
+				}
+				for i := 1; i < len(chunks); i++ {
+					time.Sleep(chunkSendDelay)
+					if i == len(chunks)-1 {
+						h.Bot.Send(chat, chunks[i], CopilotSessionMenu)
+					} else {
+						h.Bot.Send(chat, chunks[i])
+					}
+				}
+			}
 		}
 	}()
 	return nil

@@ -26,6 +26,8 @@ BtnSubAgents   = MainMenu.Data("👥 子代理", "skill_subagents")
 BtnScheduler   = MainMenu.Data("⏰ 排程任務", "skill_scheduler")
 BtnGitHub      = MainMenu.Data("🐙 GitHub", "skill_github")
 BtnEmail       = MainMenu.Data("📧 Email", "skill_email")
+BtnCalendar    = MainMenu.Data("📅 行事曆", "skill_calendar")
+BtnBriefing    = MainMenu.Data("📢 每日簡報", "skill_briefing")
 BtnSwitchModel   = MainMenu.Data("🔄 切換模型", "switch_model")
 BtnSwitchProject = MainMenu.Data("📂 切換專案", "switch_project")
 BtnStatus        = MainMenu.Data("📊 系統狀態", "status")
@@ -50,6 +52,8 @@ var ExtraFeatures = []ExtraFeature{
 {"git", "🔀 Git 操作", "skill_git"},
 {"github", "🐙 GitHub", "skill_github"},
 {"email", "📧 Email", "skill_email"},
+{"calendar", "📅 行事曆", "skill_calendar"},
+{"briefing", "📢 每日簡報", "skill_briefing"},
 {"plugins", "🧩 擴充技能", "skill_plugins"},
 {"subagents", "👥 子代理", "skill_subagents"},
 {"scheduler", "⏰ 排程任務", "skill_scheduler"},
@@ -210,6 +214,17 @@ BtnEmailRead = EmailMenu.Data("📥 讀取信箱", "email_read")
 BtnEmailBack = EmailMenu.Data("⬅️ 返回主選單", "back_main")
 )
 
+// ── Calendar submenu ──────────────────────────────────────────────────────────
+
+var CalendarMenu = &tele.ReplyMarkup{}
+
+var (
+BtnCalToday    = CalendarMenu.Data("📅 今日行程", "cal_today")
+BtnCalTomorrow = CalendarMenu.Data("📅 明日行程", "cal_tomorrow")
+BtnCalWeek     = CalendarMenu.Data("📅 本週行程", "cal_week")
+BtnCalBack     = CalendarMenu.Data("⬅️ 返回主選單", "back_main")
+)
+
 // ── PDF action menu (after upload) ────────────────────────────────────────────
 
 var PDFMenu = &tele.ReplyMarkup{}
@@ -288,6 +303,11 @@ GitHubMenu.Row(BtnGHBack),
 EmailMenu.Inline(
 EmailMenu.Row(BtnEmailSend, BtnEmailRead),
 EmailMenu.Row(BtnEmailBack),
+)
+CalendarMenu.Inline(
+CalendarMenu.Row(BtnCalToday, BtnCalTomorrow),
+CalendarMenu.Row(BtnCalWeek),
+CalendarMenu.Row(BtnCalBack),
 )
 PDFMenu.Inline(
 PDFMenu.Row(BtnPDFSummarize, BtnPDFBack),

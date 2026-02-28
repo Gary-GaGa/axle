@@ -1178,3 +1178,72 @@ func (h *Hub) HandlePhoto(c tele.Context) error {
 	msg := info.String() + fmt.Sprintf("\n\n💾 已儲存至：`%s`", savedName)
 	return c.Send(msg, h.mm(c), tele.ModeMarkdown)
 }
+
+// ── Calendar handlers ─────────────────────────────────────────────────────────
+
+func (h *Hub) HandleCalendarBtn(c tele.Context) error {
+	_ = c.Respond()
+	return c.Send("📅 *行事曆*\n\n請選擇查看範圍：", CalendarMenu, tele.ModeMarkdown)
+}
+
+func (h *Hub) HandleCalToday(c tele.Context) error {
+	_ = c.Respond()
+	return h.execCalendar(c, "today")
+}
+
+func (h *Hub) HandleCalTomorrow(c tele.Context) error {
+	_ = c.Respond()
+	return h.execCalendar(c, "tomorrow")
+}
+
+func (h *Hub) HandleCalWeek(c tele.Context) error {
+	_ = c.Respond()
+	return h.execCalendar(c, "week")
+}
+
+func (h *Hub) execCalendar(c tele.Context, period string) error {
+	userID := c.Sender().ID
+	slog.Info("📅 行事曆查詢", "period", period, "user_id", userID)
+	c.Send("📅 查詢中...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	var result string
+	var err error
+	switch period {
+	case "today":
+		result, err = skill.CalendarToday(ctx)
+	case "tomorrow":
+		result, err = skill.CalendarTomorrow(ctx)
+	case "week":
+		result, err = skill.CalendarWeek(ctx)
+	}
+
+	if err != nil {
+		return h.sendMenu(c, "❌ "+err.Error())
+	}
+	return c.Send(result, h.mm(c), tele.ModeMarkdown)
+}
+
+// ── Briefing handler ──────────────────────────────────────────────────────────
+
+func (h *Hub) HandleBriefingBtn(c tele.Context) error {
+	_ = c.Respond()
+	userID := c.Sender().ID
+	slog.Info("📢 每日簡報", "user_id", userID)
+	c.Send("📢 產生簡報中...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result := skill.GenerateBriefing(ctx, h.workspaceFor(userID))
+	chunks := skill.SplitMessage(result)
+	for i, chunk := range chunks {
+		if i == len(chunks)-1 {
+			return c.Send(chunk, h.mm(c), tele.ModeMarkdown)
+		}
+		c.Send(chunk, tele.ModeMarkdown)
+	}
+	return nil
+}
