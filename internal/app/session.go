@@ -24,6 +24,11 @@ const (
 	ModeAwaitSchedName        // Next text message = schedule name
 	ModeAwaitSchedInterval    // Next text message = schedule interval in minutes
 	ModeAwaitSchedCommand     // Next text message = schedule command
+	ModeAwaitEmailTo          // Next text message = email recipient
+	ModeAwaitEmailSubject     // Next text message = email subject
+	ModeAwaitEmailBody        // Next text message = email body
+	ModeAwaitGHPRTitle        // Next text message = PR title
+	ModeAwaitGHPRBody         // Next text message = PR body
 )
 
 // UserSession holds per-user interaction state between messages.
@@ -36,7 +41,10 @@ type UserSession struct {
 	PendingAgent    string // Sub-agent name being created
 	PendingSchedName string // Schedule name being created
 	PendingSchedCmd  string // Schedule command being created
-	EnabledExtras   map[string]bool // Optional features pinned to main menu
+	PendingEmailTo   string // Email recipient being composed
+	PendingEmailSubj string // Email subject being composed
+	PendingPRTitle   string // PR title being created
+	EnabledExtras    map[string]bool // Optional features pinned to main menu
 }
 
 // SessionManager manages per-user sessions. Goroutine-safe.

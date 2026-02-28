@@ -13,6 +13,13 @@ type Config struct {
 	TelegramToken  string
 	AllowedUserIDs []int64
 	Workspace      string
+	// Email (optional)
+	EmailAddress  string
+	EmailPassword string
+	SMTPHost      string
+	SMTPPort      string
+	IMAPHost      string
+	IMAPPort      string
 }
 
 // Load resolves config with the following priority (highest → lowest):
@@ -83,6 +90,12 @@ func Load() (*Config, error) {
 		TelegramToken:  telegramToken,
 		AllowedUserIDs: ids,
 		Workspace:      workspace,
+		EmailAddress:   firstNonEmpty(viper.GetString("EMAIL_ADDRESS"), stored.EmailAddress),
+		EmailPassword:  firstNonEmpty(viper.GetString("EMAIL_PASSWORD"), stored.EmailPassword),
+		SMTPHost:       firstNonEmpty(viper.GetString("SMTP_HOST"), stored.SMTPHost, "smtp.gmail.com"),
+		SMTPPort:       firstNonEmpty(viper.GetString("SMTP_PORT"), stored.SMTPPort, "587"),
+		IMAPHost:       firstNonEmpty(viper.GetString("IMAP_HOST"), stored.IMAPHost, "imap.gmail.com"),
+		IMAPPort:       firstNonEmpty(viper.GetString("IMAP_PORT"), stored.IMAPPort, "993"),
 	}, nil
 }
 

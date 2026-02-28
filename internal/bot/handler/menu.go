@@ -24,6 +24,8 @@ BtnGit         = MainMenu.Data("🔀 Git 操作", "skill_git")
 BtnPlugins     = MainMenu.Data("🧩 擴充技能", "skill_plugins")
 BtnSubAgents   = MainMenu.Data("👥 子代理", "skill_subagents")
 BtnScheduler   = MainMenu.Data("⏰ 排程任務", "skill_scheduler")
+BtnGitHub      = MainMenu.Data("🐙 GitHub", "skill_github")
+BtnEmail       = MainMenu.Data("📧 Email", "skill_email")
 BtnSwitchModel   = MainMenu.Data("🔄 切換模型", "switch_model")
 BtnSwitchProject = MainMenu.Data("📂 切換專案", "switch_project")
 BtnStatus        = MainMenu.Data("📊 系統狀態", "status")
@@ -46,6 +48,8 @@ var ExtraFeatures = []ExtraFeature{
 {"websearch", "🔍 Web 搜尋", "skill_websearch"},
 {"webfetch", "🌐 Web 擷取", "skill_webfetch"},
 {"git", "🔀 Git 操作", "skill_git"},
+{"github", "🐙 GitHub", "skill_github"},
+{"email", "📧 Email", "skill_email"},
 {"plugins", "🧩 擴充技能", "skill_plugins"},
 {"subagents", "👥 子代理", "skill_subagents"},
 {"scheduler", "⏰ 排程任務", "skill_scheduler"},
@@ -183,6 +187,38 @@ BtnSchedBack   = SchedulerMenu.Data("⬅️ 返回主選單", "back_main")
 var BtnSchedDelete = tele.Btn{Unique: "sched_delete"}
 var BtnSchedToggle = tele.Btn{Unique: "sched_toggle"}
 
+// ── GitHub submenu ────────────────────────────────────────────────────────────
+
+var GitHubMenu = &tele.ReplyMarkup{}
+
+var (
+BtnGHPRList    = GitHubMenu.Data("📋 PR 列表", "gh_pr_list")
+BtnGHIssueList = GitHubMenu.Data("📋 Issue 列表", "gh_issue_list")
+BtnGHCIStatus  = GitHubMenu.Data("🔄 CI 狀態", "gh_ci_status")
+BtnGHPRCreate  = GitHubMenu.Data("➕ 建立 PR", "gh_pr_create")
+BtnGHRepoView  = GitHubMenu.Data("📦 Repo 資訊", "gh_repo_view")
+BtnGHBack      = GitHubMenu.Data("⬅️ 返回主選單", "back_main")
+)
+
+// ── Email submenu ─────────────────────────────────────────────────────────────
+
+var EmailMenu = &tele.ReplyMarkup{}
+
+var (
+BtnEmailSend = EmailMenu.Data("📤 發送 Email", "email_send")
+BtnEmailRead = EmailMenu.Data("📥 讀取信箱", "email_read")
+BtnEmailBack = EmailMenu.Data("⬅️ 返回主選單", "back_main")
+)
+
+// ── PDF action menu (after upload) ────────────────────────────────────────────
+
+var PDFMenu = &tele.ReplyMarkup{}
+
+var (
+BtnPDFSummarize = PDFMenu.Data("📝 AI 摘要", "pdf_summarize")
+BtnPDFBack      = PDFMenu.Data("⬅️ 返回主選單", "back_main")
+)
+
 // ── Menu builders ─────────────────────────────────────────────────────────────
 
 func BuildVendorMenu(source string) *tele.ReplyMarkup {
@@ -242,5 +278,18 @@ SubAgentMenu.Row(BtnSubAgentBack),
 SchedulerMenu.Inline(
 SchedulerMenu.Row(BtnSchedCreate, BtnSchedList),
 SchedulerMenu.Row(BtnSchedBack),
+)
+GitHubMenu.Inline(
+GitHubMenu.Row(BtnGHPRList, BtnGHIssueList),
+GitHubMenu.Row(BtnGHCIStatus, BtnGHRepoView),
+GitHubMenu.Row(BtnGHPRCreate),
+GitHubMenu.Row(BtnGHBack),
+)
+EmailMenu.Inline(
+EmailMenu.Row(BtnEmailSend, BtnEmailRead),
+EmailMenu.Row(BtnEmailBack),
+)
+PDFMenu.Inline(
+PDFMenu.Row(BtnPDFSummarize, BtnPDFBack),
 )
 }

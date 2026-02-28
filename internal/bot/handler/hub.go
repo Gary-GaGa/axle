@@ -27,6 +27,7 @@ type Hub struct {
 	Plugins   *app.PluginManager
 	Scheduler *app.ScheduleManager
 	AllowedUserIDs []int64
+	EmailConfig    *skill.EmailConfig
 }
 
 // NewHub creates a Hub wired with the provided dependencies.

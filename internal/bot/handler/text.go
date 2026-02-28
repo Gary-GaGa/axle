@@ -57,6 +57,19 @@ func (h *Hub) HandleText(c tele.Context) error {
 			s.PendingCmd = text
 		case app.ModeAwaitSchedCommand:
 			s.Mode = app.ModeIdle
+		case app.ModeAwaitEmailTo:
+			s.Mode = app.ModeAwaitEmailSubject
+			s.PendingEmailTo = text
+		case app.ModeAwaitEmailSubject:
+			s.Mode = app.ModeAwaitEmailBody
+			s.PendingEmailSubj = text
+		case app.ModeAwaitEmailBody:
+			s.Mode = app.ModeIdle
+		case app.ModeAwaitGHPRTitle:
+			s.Mode = app.ModeAwaitGHPRBody
+			s.PendingPRTitle = text
+		case app.ModeAwaitGHPRBody:
+			s.Mode = app.ModeIdle
 		}
 	})
 
@@ -119,6 +132,21 @@ func (h *Hub) HandleText(c tele.Context) error {
 
 	case app.ModeAwaitSchedCommand:
 		return h.execCreateSchedule(c, snap.PendingSchedName, snap.PendingCmd, text)
+
+	case app.ModeAwaitEmailTo:
+		return c.Send("📝 請輸入郵件主旨：")
+
+	case app.ModeAwaitEmailSubject:
+		return c.Send("✉️ 請輸入郵件內文：")
+
+	case app.ModeAwaitEmailBody:
+		return h.execSendEmail(c, snap.PendingEmailTo, snap.PendingEmailSubj, text)
+
+	case app.ModeAwaitGHPRTitle:
+		return c.Send("📝 請輸入 PR 描述（body）：")
+
+	case app.ModeAwaitGHPRBody:
+		return h.execCreatePR(c, snap.PendingPRTitle, text)
 
 	default:
 		return h.sendMenu(c, "💡 請選擇操作")
@@ -439,4 +467,36 @@ func (h *Hub) execCreateSchedule(c tele.Context, name, intervalStr, command stri
 	}
 
 	return h.sendMenu(c, fmt.Sprintf("✅ 排程已建立\n\n• ID：`%s`\n• 名稱：%s\n• 指令：`%s`\n• 間隔：每 %d 分鐘", sched.ID, sched.Name, sched.Command, sched.Interval))
+}
+
+// ── Email send ────────────────────────────────────────────────────────────────
+
+func (h *Hub) execSendEmail(c tele.Context, to, subject, body string) error {
+	slog.Info("📧 發送 Email", "to", to, "subject", subject, "user_id", c.Sender().ID)
+
+	if h.EmailConfig == nil || !h.EmailConfig.IsConfigured() {
+		return h.sendMenu(c, "❌ Email 未設定")
+	}
+
+	c.Send("📤 發送中...")
+	if err := skill.SendEmail(*h.EmailConfig, to, subject, body); err != nil {
+		return h.sendMenu(c, "❌ 發送失敗："+err.Error())
+	}
+	return h.sendMenu(c, fmt.Sprintf("✅ Email 已發送\n\n📬 收件人：`%s`\n📝 主旨：%s", to, subject))
+}
+
+// ── GitHub PR create ──────────────────────────────────────────────────────────
+
+func (h *Hub) execCreatePR(c tele.Context, title, body string) error {
+	slog.Info("🐙 建立 PR", "title", title, "user_id", c.Sender().ID)
+	c.Send("➕ 建立 PR 中...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), skill.GHTimeout())
+	defer cancel()
+
+	out, err := skill.GHPRCreate(ctx, h.workspaceFor(c.Sender().ID), title, body)
+	if err != nil {
+		return h.sendMenu(c, "❌ "+err.Error())
+	}
+	return h.sendMenu(c, fmt.Sprintf("✅ PR 已建立\n\n%s", out))
 }

@@ -15,6 +15,12 @@ type storedCreds struct {
 	TelegramToken  string `json:"telegram_token,omitempty"`
 	AllowedUserIDs string `json:"allowed_user_ids,omitempty"`
 	Workspace      string `json:"workspace,omitempty"`
+	EmailAddress   string `json:"email_address,omitempty"`
+	EmailPassword  string `json:"email_password,omitempty"`
+	SMTPHost       string `json:"smtp_host,omitempty"`
+	SMTPPort       string `json:"smtp_port,omitempty"`
+	IMAPHost       string `json:"imap_host,omitempty"`
+	IMAPPort       string `json:"imap_port,omitempty"`
 }
 
 // CredsFilePath returns the absolute path to the credentials file.

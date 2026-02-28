@@ -3,7 +3,10 @@ package handler
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -895,8 +898,283 @@ func (h *Hub) showExtrasMenu(c tele.Context) error {
 
 	enabledCount := len(extras)
 	return c.Send(
-		fmt.Sprintf("⚙️ *更多功能*\n\n點擊可將功能加入/移除主選單\n已啟用：%d 項", enabledCount),
+		fmt.Sprintf("⚙️ *更多功能*\n\n點擊可將功能加入/移除主選單\n已啟用：%d 項\n\n💡 上傳 PDF 或圖片可直接處理", enabledCount),
 		m,
 		tele.ModeMarkdown,
 	)
+}
+
+// ── GitHub handlers ───────────────────────────────────────────────────────────
+
+// HandleGitHubBtn shows GitHub sub-menu.
+func (h *Hub) HandleGitHubBtn(c tele.Context) error {
+	slog.Info("🔘 選單: GitHub", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	if err := skill.GHCheckInstalled(); err != nil {
+		return h.sendMenu(c, "❌ "+err.Error())
+	}
+	return c.Send("🐙 *GitHub 操作*\n\n請選擇操作：", GitHubMenu, tele.ModeMarkdown)
+}
+
+// HandleGHPRList lists open pull requests.
+func (h *Hub) HandleGHPRList(c tele.Context) error {
+	slog.Info("🔘 GitHub: PR 列表", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	c.Send("📋 載入 PR 列表中...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), skill.GHTimeout())
+	defer cancel()
+
+	out, err := skill.GHPRList(ctx, h.workspaceFor(c.Sender().ID))
+	if err != nil {
+		return c.Send("❌ "+err.Error(), GitHubMenu)
+	}
+	return c.Send(fmt.Sprintf("📋 *Pull Requests*\n\n```\n%s\n```", out), GitHubMenu, tele.ModeMarkdown)
+}
+
+// HandleGHIssueList lists open issues.
+func (h *Hub) HandleGHIssueList(c tele.Context) error {
+	slog.Info("🔘 GitHub: Issue 列表", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	c.Send("📋 載入 Issue 列表中...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), skill.GHTimeout())
+	defer cancel()
+
+	out, err := skill.GHIssueList(ctx, h.workspaceFor(c.Sender().ID))
+	if err != nil {
+		return c.Send("❌ "+err.Error(), GitHubMenu)
+	}
+	return c.Send(fmt.Sprintf("📋 *Issues*\n\n```\n%s\n```", out), GitHubMenu, tele.ModeMarkdown)
+}
+
+// HandleGHCIStatus shows CI/CD status.
+func (h *Hub) HandleGHCIStatus(c tele.Context) error {
+	slog.Info("🔘 GitHub: CI 狀態", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	c.Send("🔄 載入 CI 狀態中...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), skill.GHTimeout())
+	defer cancel()
+
+	out, err := skill.GHCIStatus(ctx, h.workspaceFor(c.Sender().ID))
+	if err != nil {
+		return c.Send("❌ "+err.Error(), GitHubMenu)
+	}
+	return c.Send(fmt.Sprintf("🔄 *CI/CD 狀態*\n\n```\n%s\n```", out), GitHubMenu, tele.ModeMarkdown)
+}
+
+// HandleGHRepoView shows repository info.
+func (h *Hub) HandleGHRepoView(c tele.Context) error {
+	slog.Info("🔘 GitHub: Repo 資訊", "user_id", c.Sender().ID)
+	_ = c.Respond()
+
+	ctx, cancel := context.WithTimeout(context.Background(), skill.GHTimeout())
+	defer cancel()
+
+	out, err := skill.GHRepoView(ctx, h.workspaceFor(c.Sender().ID))
+	if err != nil {
+		return c.Send("❌ "+err.Error(), GitHubMenu)
+	}
+	chunks := skill.SplitMessage(fmt.Sprintf("📦 *Repository*\n\n```\n%s\n```", out))
+	for i, chunk := range chunks {
+		if i == len(chunks)-1 {
+			return c.Send(chunk, GitHubMenu, tele.ModeMarkdown)
+		}
+		c.Send(chunk, tele.ModeMarkdown)
+	}
+	return nil
+}
+
+// HandleGHPRCreate starts PR creation flow.
+func (h *Hub) HandleGHPRCreate(c tele.Context) error {
+	slog.Info("🔘 GitHub: 建立 PR", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	h.Sessions.Update(c.Sender().ID, func(s *app.UserSession) { s.Mode = app.ModeAwaitGHPRTitle })
+	return c.Send("➕ *建立 Pull Request*\n\n請輸入 PR 標題：", tele.ModeMarkdown)
+}
+
+// ── Email handlers ────────────────────────────────────────────────────────────
+
+// HandleEmailBtn shows email sub-menu.
+func (h *Hub) HandleEmailBtn(c tele.Context) error {
+	slog.Info("🔘 選單: Email", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	if h.EmailConfig == nil || !h.EmailConfig.IsConfigured() {
+		return h.sendMenu(c, "❌ Email 尚未設定\n\n請在環境變數或 `~/.axle/credentials.json` 中設定：\n• `EMAIL_ADDRESS`\n• `EMAIL_PASSWORD`\n• `SMTP_HOST` (預設 smtp.gmail.com)\n\n_Gmail 需使用 App Password_")
+	}
+	return c.Send("📧 *Email*\n\n請選擇操作：", EmailMenu, tele.ModeMarkdown)
+}
+
+// HandleEmailSend starts email compose flow.
+func (h *Hub) HandleEmailSend(c tele.Context) error {
+	slog.Info("🔘 Email: 發送", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	h.Sessions.Update(c.Sender().ID, func(s *app.UserSession) { s.Mode = app.ModeAwaitEmailTo })
+	return c.Send("📤 *發送 Email*\n\n請輸入收件人地址：", tele.ModeMarkdown)
+}
+
+// HandleEmailRead reads recent emails from inbox.
+func (h *Hub) HandleEmailRead(c tele.Context) error {
+	slog.Info("🔘 Email: 讀取", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	c.Send("📥 讀取信箱中...")
+
+	summaries, err := skill.ReadEmails(*h.EmailConfig, 5)
+	if err != nil {
+		return c.Send("❌ 讀取失敗："+err.Error(), EmailMenu)
+	}
+	if len(summaries) == 0 {
+		return c.Send("📥 信箱為空", EmailMenu)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📥 *最近 %d 封郵件*\n\n", len(summaries)))
+	for i, s := range summaries {
+		sb.WriteString(fmt.Sprintf("%d. *%s*\n   👤 %s\n   📅 %s\n\n", i+1, s.Subject, s.From, s.Date))
+	}
+	return c.Send(sb.String(), EmailMenu, tele.ModeMarkdown)
+}
+
+// ── PDF/Document handler ──────────────────────────────────────────────────────
+
+// HandleDocument processes uploaded documents (PDF, etc.)
+func (h *Hub) HandleDocument(c tele.Context) error {
+	doc := c.Message().Document
+	if doc == nil {
+		return nil
+	}
+	userID := c.Sender().ID
+	slog.Info("📄 收到文件", "filename", doc.FileName, "mime", doc.MIME, "size", doc.FileSize, "user_id", userID)
+
+	// Only handle PDF
+	if doc.MIME != "application/pdf" {
+		return h.sendMenu(c, fmt.Sprintf("📄 收到檔案：`%s`\n\n目前僅支援 PDF 文件處理", doc.FileName))
+	}
+
+	c.Send("📄 正在處理 PDF...")
+
+	// Download file
+	reader, err := h.Bot.File(&doc.File)
+	if err != nil {
+		return h.sendMenu(c, "❌ 下載檔案失敗："+err.Error())
+	}
+	defer reader.Close()
+
+	// Save to temp file
+	tmpFile, err := os.CreateTemp("", "axle-pdf-*.pdf")
+	if err != nil {
+		return h.sendMenu(c, "❌ 建立暫存檔失敗："+err.Error())
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := io.Copy(tmpFile, reader); err != nil {
+		tmpFile.Close()
+		return h.sendMenu(c, "❌ 儲存檔案失敗："+err.Error())
+	}
+	tmpFile.Close()
+
+	// Extract text
+	text, err := skill.ExtractPDFText(tmpPath)
+	if err != nil {
+		return h.sendMenu(c, "❌ "+err.Error())
+	}
+
+	// Store PDF text for potential summarization
+	h.Sessions.Update(userID, func(s *app.UserSession) {
+		s.PendingCmd = text
+	})
+
+	chunks := skill.SplitMessage(text)
+	for i, chunk := range chunks {
+		if i == len(chunks)-1 {
+			return c.Send(chunk, PDFMenu)
+		}
+		c.Send(chunk)
+		time.Sleep(chunkSendDelay)
+	}
+	return nil
+}
+
+// HandlePDFSummarize sends extracted PDF text to Copilot for summarization.
+func (h *Hub) HandlePDFSummarize(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🔘 PDF: AI 摘要", "user_id", userID)
+	_ = c.Respond()
+
+	sess := h.Sessions.GetCopy(userID)
+	if sess.PendingCmd == "" {
+		return h.sendMenu(c, "⚠️ 無 PDF 文字可供摘要，請先上傳 PDF")
+	}
+
+	model := sess.SelectedModel
+	if model == "" {
+		model = skill.DefaultModel
+	}
+
+	// Truncate for context window
+	pdfText := sess.PendingCmd
+	if len(pdfText) > 6000 {
+		pdfText = pdfText[:6000]
+	}
+
+	prompt := fmt.Sprintf("請用繁體中文摘要以下 PDF 文件內容，列出重點：\n\n%s", pdfText)
+	h.Sessions.Update(userID, func(s *app.UserSession) { s.PendingCmd = "" })
+
+	return h.RunCopilotTask(c, prompt, model)
+}
+
+// ── Photo/Image handler ───────────────────────────────────────────────────────
+
+// HandlePhoto processes uploaded photos.
+func (h *Hub) HandlePhoto(c tele.Context) error {
+	photo := c.Message().Photo
+	if photo == nil {
+		return nil
+	}
+	userID := c.Sender().ID
+	slog.Info("🖼 收到圖片", "file_id", photo.FileID, "user_id", userID)
+
+	c.Send("🖼 正在分析圖片...")
+
+	// Download file
+	reader, err := h.Bot.File(&photo.File)
+	if err != nil {
+		return h.sendMenu(c, "❌ 下載圖片失敗："+err.Error())
+	}
+	defer reader.Close()
+
+	// Save to temp file
+	tmpFile, err := os.CreateTemp("", "axle-img-*")
+	if err != nil {
+		return h.sendMenu(c, "❌ 建立暫存檔失敗："+err.Error())
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := io.Copy(tmpFile, reader); err != nil {
+		tmpFile.Close()
+		return h.sendMenu(c, "❌ 儲存圖片失敗："+err.Error())
+	}
+	tmpFile.Close()
+
+	// Analyze image metadata
+	info, err := skill.AnalyzeImage(tmpPath)
+	if err != nil {
+		return h.sendMenu(c, "⚠️ 圖片解析失敗："+err.Error()+"\n\n圖片已儲存但無法分析格式")
+	}
+
+	// Save to workspace if user wants
+	ws := h.workspaceFor(userID)
+	savedName := fmt.Sprintf("image_%d.%s", time.Now().Unix(), info.Format)
+	savedPath := filepath.Join(ws, savedName)
+	if data, err := os.ReadFile(tmpPath); err == nil {
+		if err := os.WriteFile(savedPath, data, 0644); err == nil {
+			slog.Info("🖼 圖片已儲存", "path", savedPath)
+		}
+	}
+
+	msg := info.String() + fmt.Sprintf("\n\n💾 已儲存至：`%s`", savedName)
+	return c.Send(msg, h.mm(c), tele.ModeMarkdown)
 }
