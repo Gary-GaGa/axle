@@ -242,6 +242,13 @@ func (h *Hub) HandleModelSelect(c tele.Context) error {
 	slog.Info("🔘 選擇模型", "model", model, "source", source, "user_id", userID)
 	_ = c.Respond()
 
+	// Update RPG equipment (weapon = model)
+	if h.RPG != nil {
+		snap := h.RPG.Snapshot()
+		snap.Equipment.Weapon = model
+		h.RPG.UpdateEquipment(snap.Equipment)
+	}
+
 	switch source {
 	case "copilot":
 		// In-session model switch: stay in Copilot prompt mode
@@ -444,8 +451,10 @@ func (h *Hub) HandleGitStatus(c tele.Context) error {
 
 	result, err := skill.GitStatus(context.Background(), h.workspaceFor(userID))
 	if err != nil {
+		h.emitRPG("git_status", "error", false)
 		return c.Send("❌ "+err.Error(), GitMenu)
 	}
+	h.emitRPG("git_status", h.workspaceFor(userID), true)
 	chunks := skill.SplitMessage("📊 *Git Status*\n\n```\n" + result + "\n```")
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {
@@ -927,8 +936,10 @@ func (h *Hub) HandleGHPRList(c tele.Context) error {
 
 	out, err := skill.GHPRList(ctx, h.workspaceFor(c.Sender().ID))
 	if err != nil {
+		h.emitRPG("github", "PR list", false)
 		return c.Send("❌ "+err.Error(), GitHubMenu)
 	}
+	h.emitRPG("github", "PR list", true)
 	return c.Send(fmt.Sprintf("📋 *Pull Requests*\n\n```\n%s\n```", out), GitHubMenu, tele.ModeMarkdown)
 }
 
@@ -1221,8 +1232,10 @@ func (h *Hub) execCalendar(c tele.Context, period string) error {
 	}
 
 	if err != nil {
+		h.emitRPG("calendar", period, false)
 		return h.sendMenu(c, "❌ "+err.Error())
 	}
+	h.emitRPG("calendar", period, true)
 	return c.Send(result, h.mm(c), tele.ModeMarkdown)
 }
 
@@ -1238,6 +1251,7 @@ func (h *Hub) HandleBriefingBtn(c tele.Context) error {
 	defer cancel()
 
 	result := skill.GenerateBriefing(ctx, h.workspaceFor(userID))
+	h.emitRPG("briefing", "daily", true)
 	chunks := skill.SplitMessage(result)
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {

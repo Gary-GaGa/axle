@@ -163,8 +163,10 @@ func (h *Hub) execReadCode(c tele.Context, relPath string) error {
 
 	result, err := skill.ReadCode(context.Background(), h.workspaceFor(c.Sender().ID), relPath)
 	if err != nil {
+		h.emitRPG("read_code", relPath, false)
 		return h.sendMenu(c, "❌ "+err.Error())
 	}
+	h.emitRPG("read_code", relPath, true)
 
 	chunks := skill.SplitMessage(result)
 	for i, chunk := range chunks {
@@ -263,11 +265,14 @@ func (h *Hub) execWebSearch(c tele.Context, query string) error {
 
 	results, err := skill.WebSearch(ctx, query)
 	if err != nil {
+		h.emitRPG("web_search", query, false)
 		return h.sendMenu(c, "❌ 搜尋失敗："+err.Error())
 	}
 	if len(results) == 0 {
+		h.emitRPG("web_search", query, true)
 		return h.sendMenu(c, "🔍 未找到相關結果")
 	}
+	h.emitRPG("web_search", query, true)
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("🔍 *搜尋結果*：`%s`\n\n", query))
@@ -291,8 +296,10 @@ func (h *Hub) execWebFetch(c tele.Context, rawURL string) error {
 
 	text, err := skill.WebFetch(ctx, rawURL)
 	if err != nil {
+		h.emitRPG("web_fetch", rawURL, false)
 		return h.sendMenu(c, "❌ 擷取失敗："+err.Error())
 	}
+	h.emitRPG("web_fetch", rawURL, true)
 
 	header := fmt.Sprintf("🌐 *擷取結果*：`%s`\n\n", rawURL)
 	chunks := skill.SplitMessage(header + text)
@@ -352,8 +359,10 @@ func (h *Hub) execListDir(c tele.Context, relPath string) error {
 
 	result, err := skill.ListDir(context.Background(), h.workspaceFor(c.Sender().ID), relPath, 3)
 	if err != nil {
+		h.emitRPG("list_dir", relPath, false)
 		return h.sendMenu(c, "❌ "+err.Error())
 	}
+	h.emitRPG("list_dir", relPath, true)
 
 	chunks := skill.SplitMessage("```\n" + result + "\n```")
 	for i, chunk := range chunks {
@@ -376,8 +385,10 @@ func (h *Hub) execSearchCode(c tele.Context, pattern string) error {
 
 	results, err := skill.SearchCode(context.Background(), h.workspaceFor(c.Sender().ID), pattern)
 	if err != nil {
+		h.emitRPG("search_code", pattern, false)
 		return h.sendMenu(c, "❌ 搜尋失敗："+err.Error())
 	}
+	h.emitRPG("search_code", pattern, true)
 
 	text := skill.FormatSearchResults(pattern, results)
 	chunks := skill.SplitMessage(text)

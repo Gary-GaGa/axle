@@ -26,6 +26,7 @@ type Hub struct {
 	SubAgents *app.SubAgentManager
 	Plugins   *app.PluginManager
 	Scheduler *app.ScheduleManager
+	RPG       *app.RPGManager
 	AllowedUserIDs []int64
 	EmailConfig    *skill.EmailConfig
 }
@@ -50,6 +51,13 @@ func (h *Hub) workspaceFor(userID int64) string {
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+// emitRPG records a skill event to the RPG dashboard.
+func (h *Hub) emitRPG(skillID, detail string, success bool) {
+	if h.RPG != nil {
+		h.RPG.EmitEvent(skillID, detail, success)
+	}
+}
 
 // mm returns the dynamic main menu for the current user.
 func (h *Hub) mm(c tele.Context) *tele.ReplyMarkup {
@@ -170,12 +178,15 @@ func (h *Hub) RunExecTask(c tele.Context, command string) error {
 		case errors.Is(err, context.Canceled):
 			slog.Info("🛑 Shell 任務已取消", "user_id", userID)
 			h.Bot.Send(chat, "🛑 指令執行已取消", h.mmFor(userID))
+			h.emitRPG("exec_shell", command, false)
 		case err != nil:
 			slog.Error("❌ Shell 任務失敗", "error", err)
 			h.Bot.Send(chat, "❌ "+err.Error(), h.mmFor(userID))
+			h.emitRPG("exec_shell", command, false)
 		default:
 			slog.Info("✅ Shell 任務完成", "user_id", userID)
 			h.sendChunks(chat, skill.SplitMessage("```\n"+out+"\n```"), userID)
+			h.emitRPG("exec_shell", command, true)
 		}
 	}()
 	return nil
@@ -256,6 +267,7 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 		switch {
 		case errors.Is(err, context.Canceled):
 			slog.Info("🛑 Copilot 任務已取消", "user_id", userID)
+			h.emitRPG("copilot_stream", prompt, false)
 			if sentMsg != nil {
 				h.Bot.Edit(sentMsg, "🛑 Copilot 任務已取消", h.mmFor(userID))
 			} else {
@@ -263,6 +275,7 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 			}
 		case err != nil:
 			slog.Error("❌ Copilot 任務失敗", "error", err)
+			h.emitRPG("copilot_stream", prompt, false)
 			if sentMsg != nil {
 				h.Bot.Edit(sentMsg, "❌ "+err.Error(), CopilotSessionMenu)
 			} else {
@@ -270,6 +283,7 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 			}
 		default:
 			slog.Info("✅ Copilot 任務完成", "len", len(result), "user_id", userID)
+			h.emitRPG("copilot_stream", fmt.Sprintf("%d 字元", len(result)), true)
 			if h.Memory != nil {
 				_ = h.Memory.Add(userID, "assistant", result, model)
 			}
