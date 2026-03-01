@@ -74,10 +74,14 @@ func (h *Hub) sendChunks(chat tele.Recipient, chunks []string, userID int64) {
 		if i > 0 {
 			time.Sleep(chunkSendDelay)
 		}
+		var err error
 		if i == len(chunks)-1 {
-			h.Bot.Send(chat, chunk, menu)
+			_, err = h.Bot.Send(chat, chunk, menu)
 		} else {
-			h.Bot.Send(chat, chunk)
+			_, err = h.Bot.Send(chat, chunk)
+		}
+		if err != nil {
+			slog.Warn("⚠️ chunk 發送失敗", "chunk", i, "error", err)
 		}
 	}
 }
@@ -88,10 +92,14 @@ func (h *Hub) sendCopilotChunks(chat tele.Recipient, chunks []string) {
 		if i > 0 {
 			time.Sleep(chunkSendDelay)
 		}
+		var err error
 		if i == len(chunks)-1 {
-			h.Bot.Send(chat, chunk, CopilotSessionMenu)
+			_, err = h.Bot.Send(chat, chunk, CopilotSessionMenu)
 		} else {
-			h.Bot.Send(chat, chunk)
+			_, err = h.Bot.Send(chat, chunk)
+		}
+		if err != nil {
+			slog.Warn("⚠️ chunk 發送失敗", "chunk", i, "error", err)
 		}
 	}
 }

@@ -68,6 +68,7 @@ func sendTLS(cfg EmailConfig, to, msg string) error {
 	if err != nil {
 		return fmt.Errorf("TLS 連線失敗: %w", err)
 	}
+	defer conn.Close() // ensure connection is closed even if NewClient fails
 
 	client, err := smtp.NewClient(conn, cfg.SMTPHost)
 	if err != nil {

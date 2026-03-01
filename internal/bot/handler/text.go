@@ -171,7 +171,9 @@ func (h *Hub) execReadCode(c tele.Context, relPath string) error {
 		if i == len(chunks)-1 {
 			return c.Send(chunk, h.mm(c), tele.ModeMarkdown)
 		}
-		c.Send(chunk, tele.ModeMarkdown)
+		if _, err := c.Bot().Send(c.Chat(), chunk, tele.ModeMarkdown); err != nil {
+			slog.Warn("⚠️ 訊息發送失敗", "chunk", i, "error", err)
+		}
 	}
 	return nil
 }
@@ -298,7 +300,9 @@ func (h *Hub) execWebFetch(c tele.Context, rawURL string) error {
 		if i == len(chunks)-1 {
 			return c.Send(chunk, h.mm(c))
 		}
-		c.Send(chunk)
+		if _, err := c.Bot().Send(c.Chat(), chunk); err != nil {
+			slog.Warn("⚠️ 訊息發送失敗", "chunk", i, "error", err)
+		}
 	}
 	return nil
 }
@@ -356,7 +360,9 @@ func (h *Hub) execListDir(c tele.Context, relPath string) error {
 		if i == len(chunks)-1 {
 			return c.Send(chunk, h.mm(c), tele.ModeMarkdown)
 		}
-		c.Send(chunk, tele.ModeMarkdown)
+		if _, err := c.Bot().Send(c.Chat(), chunk, tele.ModeMarkdown); err != nil {
+			slog.Warn("⚠️ 訊息發送失敗", "chunk", i, "error", err)
+		}
 	}
 	return nil
 }
@@ -379,7 +385,9 @@ func (h *Hub) execSearchCode(c tele.Context, pattern string) error {
 		if i == len(chunks)-1 {
 			return c.Send(chunk, h.mm(c), tele.ModeMarkdown)
 		}
-		c.Send(chunk, tele.ModeMarkdown)
+		if _, err := c.Bot().Send(c.Chat(), chunk, tele.ModeMarkdown); err != nil {
+			slog.Warn("⚠️ 訊息發送失敗", "chunk", i, "error", err)
+		}
 	}
 	return nil
 }

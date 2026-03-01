@@ -88,7 +88,14 @@ func RunCopilotStream(ctx context.Context, workspace, model, prompt string, onUp
 		model = DefaultModel
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, copilotTimeout)
+	// Use copilot timeout, but respect shorter parent deadline
+	timeout := copilotTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < timeout {
+			timeout = remaining
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "copilot",
@@ -113,6 +120,13 @@ func RunCopilotStream(ctx context.Context, workspace, model, prompt string, onUp
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("Copilot 啟動失敗: %w", err)
 	}
+	// Ensure process is cleaned up even if scanner panics or goroutine is interrupted
+	defer func() {
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+			cmd.Wait() // reap zombie
+		}
+	}()
 
 	var accumulated strings.Builder
 	scanner := bufio.NewScanner(stdout)
