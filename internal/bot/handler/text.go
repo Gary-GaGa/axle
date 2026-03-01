@@ -247,8 +247,10 @@ func (h *Hub) handleWriteContentInput(c tele.Context, relPath, content string) e
 	slog.Info("✏️ 寫入檔案", "path", relPath, "size", len(content), "user_id", c.Sender().ID)
 
 	if err := skill.WriteFile(h.workspaceFor(c.Sender().ID), relPath, content); err != nil {
+		h.emitRPG("write_file", relPath, false)
 		return h.sendMenu(c, "❌ "+err.Error())
 	}
+	h.emitRPG("write_file", relPath, true)
 
 	return h.sendMenu(c, fmt.Sprintf("✅ 檔案已寫入：`%s`（%d bytes）", relPath, len(content)))
 }
@@ -451,6 +453,7 @@ func (h *Hub) execCreateSubAgent(c tele.Context, name, task string) error {
 		if err != nil {
 			h.SubAgents.Fail(agent.ID, err.Error())
 			h.Bot.Send(chat, fmt.Sprintf("❌ 子代理 `%s` 失敗：%s", agent.ID, err.Error()), h.mmFor(userID))
+			h.emitRPG("sub_agent", name, false)
 			return
 		}
 
@@ -459,6 +462,7 @@ func (h *Hub) execCreateSubAgent(c tele.Context, name, task string) error {
 			result += ch
 		}
 		h.SubAgents.Complete(agent.ID, result)
+		h.emitRPG("sub_agent", name, true)
 
 		msg := fmt.Sprintf("✅ 子代理 `%s` 完成\n\n%s", agent.ID, result)
 		msgChunks := skill.SplitMessage(msg)
@@ -503,8 +507,10 @@ func (h *Hub) execSendEmail(c tele.Context, to, subject, body string) error {
 
 	c.Send("📤 發送中...")
 	if err := skill.SendEmail(*h.EmailConfig, to, subject, body); err != nil {
+		h.emitRPG("email_send", to, false)
 		return h.sendMenu(c, "❌ 發送失敗："+err.Error())
 	}
+	h.emitRPG("email_send", to, true)
 	return h.sendMenu(c, fmt.Sprintf("✅ Email 已發送\n\n📬 收件人：`%s`\n📝 主旨：%s", to, subject))
 }
 
@@ -519,7 +525,9 @@ func (h *Hub) execCreatePR(c tele.Context, title, body string) error {
 
 	out, err := skill.GHPRCreate(ctx, h.workspaceFor(c.Sender().ID), title, body)
 	if err != nil {
+		h.emitRPG("github", "PR create", false)
 		return h.sendMenu(c, "❌ "+err.Error())
 	}
+	h.emitRPG("github", "PR create", true)
 	return h.sendMenu(c, fmt.Sprintf("✅ PR 已建立\n\n%s", out))
 }

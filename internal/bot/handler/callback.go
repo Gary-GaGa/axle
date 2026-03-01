@@ -473,8 +473,10 @@ func (h *Hub) HandleGitDiff(c tele.Context) error {
 
 	result, err := skill.GitDiff(context.Background(), h.workspaceFor(userID), false)
 	if err != nil {
+		h.emitRPG("git_diff", "unstaged", false)
 		return c.Send("❌ "+err.Error(), GitMenu)
 	}
+	h.emitRPG("git_diff", "unstaged", true)
 	chunks := skill.SplitMessage("📝 *Git Diff (Unstaged)*\n\n```diff\n" + result + "\n```")
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {
@@ -493,8 +495,10 @@ func (h *Hub) HandleGitDiffStaged(c tele.Context) error {
 
 	result, err := skill.GitDiff(context.Background(), h.workspaceFor(userID), true)
 	if err != nil {
+		h.emitRPG("git_diff", "staged", false)
 		return c.Send("❌ "+err.Error(), GitMenu)
 	}
+	h.emitRPG("git_diff", "staged", true)
 	chunks := skill.SplitMessage("📦 *Git Diff (Staged)*\n\n```diff\n" + result + "\n```")
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {
@@ -513,8 +517,10 @@ func (h *Hub) HandleGitLog(c tele.Context) error {
 
 	result, err := skill.GitLog(context.Background(), h.workspaceFor(userID), 15)
 	if err != nil {
+		h.emitRPG("git_log", "error", false)
 		return c.Send("❌ "+err.Error(), GitMenu)
 	}
+	h.emitRPG("git_log", h.workspaceFor(userID), true)
 	chunks := skill.SplitMessage("📜 *Git Log (最近 15 筆)*\n\n```\n" + result + "\n```")
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {
@@ -954,8 +960,10 @@ func (h *Hub) HandleGHIssueList(c tele.Context) error {
 
 	out, err := skill.GHIssueList(ctx, h.workspaceFor(c.Sender().ID))
 	if err != nil {
+		h.emitRPG("github", "Issue list", false)
 		return c.Send("❌ "+err.Error(), GitHubMenu)
 	}
+	h.emitRPG("github", "Issue list", true)
 	return c.Send(fmt.Sprintf("📋 *Issues*\n\n```\n%s\n```", out), GitHubMenu, tele.ModeMarkdown)
 }
 
@@ -970,8 +978,10 @@ func (h *Hub) HandleGHCIStatus(c tele.Context) error {
 
 	out, err := skill.GHCIStatus(ctx, h.workspaceFor(c.Sender().ID))
 	if err != nil {
+		h.emitRPG("github", "CI status", false)
 		return c.Send("❌ "+err.Error(), GitHubMenu)
 	}
+	h.emitRPG("github", "CI status", true)
 	return c.Send(fmt.Sprintf("🔄 *CI/CD 狀態*\n\n```\n%s\n```", out), GitHubMenu, tele.ModeMarkdown)
 }
 
@@ -985,8 +995,10 @@ func (h *Hub) HandleGHRepoView(c tele.Context) error {
 
 	out, err := skill.GHRepoView(ctx, h.workspaceFor(c.Sender().ID))
 	if err != nil {
+		h.emitRPG("github", "Repo view", false)
 		return c.Send("❌ "+err.Error(), GitHubMenu)
 	}
+	h.emitRPG("github", "Repo view", true)
 	chunks := skill.SplitMessage(fmt.Sprintf("📦 *Repository*\n\n```\n%s\n```", out))
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {
@@ -1033,8 +1045,10 @@ func (h *Hub) HandleEmailRead(c tele.Context) error {
 
 	summaries, err := skill.ReadEmails(*h.EmailConfig, 5)
 	if err != nil {
+		h.emitRPG("email_read", "error", false)
 		return c.Send("❌ 讀取失敗："+err.Error(), EmailMenu)
 	}
+	h.emitRPG("email_read", fmt.Sprintf("%d 封", len(summaries)), true)
 	if len(summaries) == 0 {
 		return c.Send("📥 信箱為空", EmailMenu)
 	}
@@ -1089,8 +1103,10 @@ func (h *Hub) HandleDocument(c tele.Context) error {
 	// Extract text
 	text, err := skill.ExtractPDFText(tmpPath)
 	if err != nil {
+		h.emitRPG("pdf", doc.FileName, false)
 		return h.sendMenu(c, "❌ "+err.Error())
 	}
+	h.emitRPG("pdf", doc.FileName, true)
 
 	// Store PDF text for potential summarization
 	h.Sessions.Update(userID, func(s *app.UserSession) {
@@ -1173,8 +1189,10 @@ func (h *Hub) HandlePhoto(c tele.Context) error {
 	// Analyze image metadata
 	info, err := skill.AnalyzeImage(tmpPath)
 	if err != nil {
+		h.emitRPG("image", "analysis", false)
 		return h.sendMenu(c, "⚠️ 圖片解析失敗："+err.Error()+"\n\n圖片已儲存但無法分析格式")
 	}
+	h.emitRPG("image", info.Format, true)
 
 	// Save to workspace if user wants
 	ws := h.workspaceFor(userID)
