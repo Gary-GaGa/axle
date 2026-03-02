@@ -22,6 +22,7 @@ type Hub struct {
 	Sessions  *app.SessionManager
 	Bot       *tele.Bot
 	Workspace string
+	SourceDir string // Axle source code directory for self-upgrade
 	Memory    *app.MemoryStore
 	SubAgents *app.SubAgentManager
 	Plugins   *app.PluginManager
@@ -29,6 +30,7 @@ type Hub struct {
 	RPG       *app.RPGManager
 	AllowedUserIDs []int64
 	EmailConfig    *skill.EmailConfig
+	RestartCh      chan struct{} // signal main goroutine to restart
 }
 
 // NewHub creates a Hub wired with the provided dependencies.

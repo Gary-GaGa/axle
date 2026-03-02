@@ -46,6 +46,7 @@ var SkillDefs = map[string]RPGSkillDef{
 	"pdf":          {ID: "pdf", Name: "Scroll Decode", Icon: "📄", Type: "解讀", XP: 10, Sprite: "decode"},
 	"image":        {ID: "image", Name: "Vision Lens", Icon: "📸", Type: "偵查", XP: 10, Sprite: "lens"},
 	"github":       {ID: "github", Name: "Guild Board", Icon: "📋", Type: "情報", XP: 10, Sprite: "guild"},
+	"self_upgrade":  {ID: "self_upgrade", Name: "Self Evolution", Icon: "🔧", Type: "進化", XP: 50, Sprite: "evolve"},
 }
 
 // ── Level system ─────────────────────────────────────────────────────────────

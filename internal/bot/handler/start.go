@@ -3,6 +3,7 @@ package handler
 import (
 	"log/slog"
 
+	"github.com/garyellow/axle/internal/app"
 	tele "gopkg.in/telebot.v3"
 )
 
@@ -17,7 +18,7 @@ func (h *Hub) HandleStart(c tele.Context) error {
 	}
 
 	return c.Send(
-		"🔧 *Axle 引擎已啟動*\n\n"+
+		"🔧 *Axle v"+app.Version+" 引擎已啟動*\n\n"+
 			"當前模式：單兵作戰\n"+
 			"任務狀態："+status+"\n\n"+
 			"請選擇操作：",

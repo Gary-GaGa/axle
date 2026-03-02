@@ -113,6 +113,7 @@ func (h *Hub) HandleStatus(c tele.Context) error {
 
 	return c.Send(fmt.Sprintf(
 		"📊 *系統狀態*\n\n"+
+			"• 版本：`v%s`\n"+
 			"• 任務狀態：%s\n"+
 			"• 選定模型：`%s`\n"+
 			"• Workspace：`%s`\n"+
@@ -120,7 +121,7 @@ func (h *Hub) HandleStatus(c tele.Context) error {
 			"• 子代理：%d 個執行中\n"+
 			"• 擴充技能：%d 個\n"+
 			"• 排程任務：%d 個",
-		taskStatus, model, wsLabel, memCount, agentCount, pluginCount, schedCount,
+		app.Version, taskStatus, model, wsLabel, memCount, agentCount, pluginCount, schedCount,
 	), h.mm(c), tele.ModeMarkdown)
 }
 
@@ -1278,4 +1279,143 @@ func (h *Hub) HandleBriefingBtn(c tele.Context) error {
 		c.Send(chunk, tele.ModeMarkdown)
 	}
 	return nil
+}
+
+// ── Self-Upgrade handlers ─────────────────────────────────────────────────────
+
+// HandleSelfUpgradeBtn starts the self-upgrade flow.
+func (h *Hub) HandleSelfUpgradeBtn(c tele.Context) error {
+	slog.Info("🔧 選單: 自我升級", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	h.Sessions.Update(c.Sender().ID, func(s *app.UserSession) {
+		s.Mode = app.ModeAwaitUpgradeRequest
+	})
+	return c.Send(
+		"🔧 *自我升級模式*\n\n"+
+			"請描述你想要新增或修改的功能：\n\n"+
+			"_例如：「加一個天氣查詢功能」_",
+		tele.ModeMarkdown,
+	)
+}
+
+// HandleUpgradeConfirm executes the upgrade plan.
+func (h *Hub) HandleUpgradeConfirm(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Warn("🔧 確認自我升級", "user_id", userID)
+	_ = c.Respond()
+
+	var request, plan string
+	h.Sessions.Update(userID, func(s *app.UserSession) {
+		request = s.PendingUpgradeReq
+		plan = s.PendingUpgradePlan
+		s.Mode = app.ModeIdle
+	})
+
+	if request == "" || plan == "" {
+		return h.sendMenu(c, "⚠️ 升級請求遺失，請重新操作")
+	}
+
+	sess := h.Sessions.GetCopy(userID)
+	model := sess.SelectedModel
+	if model == "" {
+		model = skill.DefaultModel
+	}
+
+	srcDir := h.SourceDir
+	chat := c.Chat()
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("💥 自我升級 panic", "recover", r)
+				h.Bot.Send(chat, "💥 升級過程異常中止", h.mmFor(userID))
+			}
+		}()
+
+		// Step 1: Backup binary
+		h.Bot.Send(chat, "📦 *Step 1/6* — 備份 binary...", tele.ModeMarkdown)
+		if err := skill.UpgradeBackupBinary(srcDir); err != nil {
+			h.Bot.Send(chat, "❌ 備份失敗："+err.Error(), h.mmFor(userID))
+			return
+		}
+
+		// Step 2: Apply changes via Copilot
+		h.Bot.Send(chat, "⚙️ *Step 2/6* — Copilot 正在修改程式碼...", tele.ModeMarkdown)
+		summary, err := skill.UpgradeApply(context.Background(), srcDir, model, request, plan)
+		if err != nil {
+			h.Bot.Send(chat, "❌ 開發失敗："+err.Error(), h.mmFor(userID))
+			return
+		}
+		h.emitRPG("self_upgrade", "apply", true)
+
+		// Step 3: Bump version
+		h.Bot.Send(chat, "🏷 *Step 3/6* — 更新版本號...", tele.ModeMarkdown)
+		newVer, err := skill.BumpVersion(srcDir)
+		if err != nil {
+			h.Bot.Send(chat, "⚠️ 版本號更新失敗："+err.Error(), h.mmFor(userID))
+			newVer = app.Version // fallback
+		}
+
+		// Step 4: Build + Vet
+		h.Bot.Send(chat, "🔨 *Step 4/6* — 編譯 + 檢查...", tele.ModeMarkdown)
+		if err := skill.UpgradeBuild(context.Background(), srcDir); err != nil {
+			h.Bot.Send(chat, fmt.Sprintf("❌ 編譯失敗，自動回滾...\n\n```\n%s\n```", err.Error()), tele.ModeMarkdown)
+			skill.UpgradeRollbackBinary(srcDir)
+			h.emitRPG("self_upgrade", "build failed", false)
+			h.Bot.Send(chat, "↩️ 已回滾至舊版本", h.mmFor(userID))
+			return
+		}
+
+		// Step 5: Test
+		h.Bot.Send(chat, "🧪 *Step 5/6* — 執行測試...", tele.ModeMarkdown)
+		testOut, err := skill.UpgradeTest(context.Background(), srcDir)
+		if err != nil {
+			h.Bot.Send(chat, fmt.Sprintf("❌ 測試失敗，自動回滾...\n\n```\n%s\n```", testOut), tele.ModeMarkdown)
+			skill.UpgradeRollbackBinary(srcDir)
+			h.emitRPG("self_upgrade", "test failed", false)
+			h.Bot.Send(chat, "↩️ 已回滾至舊版本", h.mmFor(userID))
+			return
+		}
+
+		// Step 6: Git commit
+		h.Bot.Send(chat, "📝 *Step 6/6* — Git commit...", tele.ModeMarkdown)
+		commitSummary := request
+		if len(commitSummary) > 50 {
+			commitSummary = commitSummary[:50]
+		}
+		if err := skill.UpgradeCommit(context.Background(), srcDir, newVer, commitSummary); err != nil {
+			slog.Warn("升級 commit 失敗", "error", err)
+			h.Bot.Send(chat, "⚠️ Git commit 失敗（升級仍生效）："+err.Error())
+		}
+
+		// Report summary
+		msg := fmt.Sprintf("✅ *升級完成！*\n\n"+
+			"📋 版本：`v%s`\n"+
+			"📝 變更摘要：\n%s\n\n"+
+			"🔄 即將重啟 Axle...",
+			newVer, summary)
+		chunks := skill.SplitMessage(msg)
+		for _, chunk := range chunks {
+			h.Bot.Send(chat, chunk, tele.ModeMarkdown)
+			time.Sleep(300 * time.Millisecond)
+		}
+
+		h.emitRPG("self_upgrade", "v"+newVer, true)
+
+		// Signal restart
+		time.Sleep(2 * time.Second)
+		if h.RestartCh != nil {
+			close(h.RestartCh)
+		}
+	}()
+
+	return c.Send("🚀 升級流程啟動...\n\n_請勿中斷，過程約需 2-5 分鐘_", tele.ModeMarkdown)
+}
+
+// HandleUpgradeCancel cancels the self-upgrade.
+func (h *Hub) HandleUpgradeCancel(c tele.Context) error {
+	slog.Info("❌ 取消自我升級", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	h.Sessions.Reset(c.Sender().ID)
+	return h.sendMenu(c, "❌ 自我升級已取消")
 }

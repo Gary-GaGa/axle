@@ -27,7 +27,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	slog.Info("🚀 Axle 啟動中...")
+	slog.Info("🚀 Axle 啟動中...", "version", app.Version)
 
 	// --- Config ---
 	cfg, err := configs.Load()
@@ -59,6 +59,19 @@ func main() {
 	sessions := app.NewSessionManager()
 	hub := handler.NewHub(tasks, sessions, bot, cfg.Workspace)
 	hub.AllowedUserIDs = cfg.AllowedUserIDs
+	hub.RestartCh = make(chan struct{})
+
+	// Determine Axle source directory (for self-upgrade)
+	if exe, err := os.Executable(); err == nil {
+		hub.SourceDir = filepath.Dir(filepath.Dir(filepath.Dir(exe))) // strip cmd/axle/
+		// If binary is in project root (typical), use that directly
+		if _, err := os.Stat(filepath.Join(hub.SourceDir, "go.mod")); err != nil {
+			// Fallback: try current working directory
+			if wd, err := os.Getwd(); err == nil {
+				hub.SourceDir = wd
+			}
+		}
+	}
 
 	// --- Email config ---
 	hub.EmailConfig = &skill.EmailConfig{
@@ -251,51 +264,73 @@ func main() {
 	// --- PDF actions ---
 	bot.Handle(&handler.BtnPDFSummarize, hub.HandlePDFSummarize)
 
+	// --- Self-Upgrade ---
+	bot.Handle(&handler.BtnSelfUpgrade, hub.HandleSelfUpgradeBtn)
+	bot.Handle(&handler.BtnUpgradeConfirm, hub.HandleUpgradeConfirm)
+	bot.Handle(&handler.BtnUpgradeCancel, hub.HandleUpgradeCancel)
+
 	// --- Graceful Shutdown ---
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		sig := <-sigCh
-		slog.Info("收到終止信號，正在關閉...", "signal", sig)
-		tasks.Cancel() // cancel any running task
 
-		// Stop scheduler
-		if scheduler != nil {
-			scheduler.StopAll()
-		}
-
-		// Stop web dashboard
-		webSrv.Shutdown()
-
-		// Notify all whitelisted users before shutdown (with timeout)
-		notifyDone := make(chan struct{})
-		go func() {
-			defer close(notifyDone)
-			for _, uid := range cfg.AllowedUserIDs {
-				chat := tele.ChatID(uid)
-				if _, err := bot.Send(chat, "⚠️ Axle 服務正在關閉，Bot 即將離線。\n\n_收到終止信號："+sig.String()+"_", tele.ModeMarkdown); err != nil {
-					slog.Warn("關閉通知發送失敗", "user_id", uid, "error", err)
-				}
-			}
-		}()
-
-		// Wait for notifications with 10s hard deadline
 		select {
-		case <-notifyDone:
-			slog.Info("關閉通知已發送")
-		case <-time.After(10 * time.Second):
-			slog.Warn("關閉通知超時，強制停止")
-		}
+		case sig := <-sigCh:
+			slog.Info("收到終止信號，正在關閉...", "signal", sig)
+			tasks.Cancel()
+			if scheduler != nil {
+				scheduler.StopAll()
+			}
+			webSrv.Shutdown()
 
-		bot.Stop()
+			notifyDone := make(chan struct{})
+			go func() {
+				defer close(notifyDone)
+				for _, uid := range cfg.AllowedUserIDs {
+					chat := tele.ChatID(uid)
+					if _, err := bot.Send(chat, "⚠️ Axle 服務正在關閉，Bot 即將離線。\n\n_收到終止信號："+sig.String()+"_", tele.ModeMarkdown); err != nil {
+						slog.Warn("關閉通知發送失敗", "user_id", uid, "error", err)
+					}
+				}
+			}()
+
+			select {
+			case <-notifyDone:
+				slog.Info("關閉通知已發送")
+			case <-time.After(10 * time.Second):
+				slog.Warn("關閉通知超時，強制停止")
+			}
+			bot.Stop()
+
+		case <-hub.RestartCh:
+			slog.Info("🔄 自我升級重啟中...")
+			tasks.Cancel()
+			if scheduler != nil {
+				scheduler.StopAll()
+			}
+			webSrv.Shutdown()
+			bot.Stop()
+
+			// Re-exec the new binary
+			exe, err := os.Executable()
+			if err != nil {
+				slog.Error("取得執行檔路徑失敗", "error", err)
+				os.Exit(1)
+			}
+			slog.Info("🚀 重啟 Axle", "exe", exe)
+			if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
+				slog.Error("syscall.Exec 失敗", "error", err)
+				os.Exit(1)
+			}
+		}
 	}()
 
-	slog.Info("🤖 Axle Bot 已上線，開始接收訊息...")
+	slog.Info("🤖 Axle Bot 已上線，開始接收訊息...", "version", app.Version)
 
 	// Notify all whitelisted users that bot is online
 	for _, uid := range cfg.AllowedUserIDs {
 		chat := tele.ChatID(uid)
-		if _, err := bot.Send(chat, "🟢 Axle 引擎已啟動，等待指令...", handler.MainMenu); err != nil {
+		if _, err := bot.Send(chat, fmt.Sprintf("🟢 Axle v%s 已啟動，等待指令...", app.Version), handler.MainMenu); err != nil {
 			slog.Warn("啟動通知發送失敗", "user_id", uid, "error", err)
 		}
 	}

@@ -72,6 +72,8 @@ func (h *Hub) HandleText(c tele.Context) error {
 			s.PendingPRTitle = text
 		case app.ModeAwaitGHPRBody:
 			s.Mode = app.ModeIdle
+		case app.ModeAwaitUpgradeRequest:
+			s.Mode = app.ModeIdle
 		}
 	})
 
@@ -151,6 +153,9 @@ func (h *Hub) HandleText(c tele.Context) error {
 
 	case app.ModeAwaitGHPRBody:
 		return h.execCreatePR(c, snap.PendingPRTitle, text)
+
+	case app.ModeAwaitUpgradeRequest:
+		return h.execUpgradePlan(c, text)
 
 	default:
 		return h.sendMenu(c, "💡 請選擇操作")
@@ -530,4 +535,45 @@ func (h *Hub) execCreatePR(c tele.Context, title, body string) error {
 	}
 	h.emitRPG("github", "PR create", true)
 	return h.sendMenu(c, fmt.Sprintf("✅ PR 已建立\n\n%s", out))
+}
+
+// ── Self-upgrade ──────────────────────────────────────────────────────────────
+
+// execUpgradePlan asks Copilot to create an upgrade plan and shows it for confirmation.
+func (h *Hub) execUpgradePlan(c tele.Context, request string) error {
+	userID := c.Sender().ID
+	slog.Info("🔧 自我升級規劃", "request", request, "user_id", userID)
+
+	sess := h.Sessions.GetCopy(userID)
+	model := sess.SelectedModel
+	if model == "" {
+		model = skill.DefaultModel
+	}
+
+	c.Send("🧠 *分析需求 & 規劃中...*\n\n_這可能需要 1-2 分鐘_", tele.ModeMarkdown)
+
+	plan, err := skill.UpgradePlan(context.Background(), h.SourceDir, model, request)
+	if err != nil {
+		h.emitRPG("self_upgrade", "plan failed", false)
+		return h.sendMenu(c, "❌ 規劃失敗："+err.Error())
+	}
+
+	// Store plan in session
+	h.Sessions.Update(userID, func(s *app.UserSession) {
+		s.PendingUpgradeReq = request
+		s.PendingUpgradePlan = plan
+	})
+
+	h.emitRPG("self_upgrade", "plan", true)
+
+	msg := fmt.Sprintf("📋 *升級計畫*\n\n%s\n\n⚠️ 確認後將自動修改程式碼、編譯、測試並重啟", plan)
+	chunks := skill.SplitMessage(msg)
+	for i, chunk := range chunks {
+		if i == len(chunks)-1 {
+			return c.Send(chunk, UpgradeMenu, tele.ModeMarkdown)
+		}
+		c.Send(chunk, tele.ModeMarkdown)
+		time.Sleep(300 * time.Millisecond)
+	}
+	return nil
 }

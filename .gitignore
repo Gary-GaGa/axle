@@ -1,5 +1,6 @@
 # Axle build output
 /axle
+/axle.bak
 
 # Environment
 .env

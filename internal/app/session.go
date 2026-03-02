@@ -29,6 +29,7 @@ const (
 	ModeAwaitEmailBody        // Next text message = email body
 	ModeAwaitGHPRTitle        // Next text message = PR title
 	ModeAwaitGHPRBody         // Next text message = PR body
+	ModeAwaitUpgradeRequest   // Next text message = feature request for self-upgrade
 )
 
 // UserSession holds per-user interaction state between messages.
@@ -44,6 +45,8 @@ type UserSession struct {
 	PendingEmailTo   string // Email recipient being composed
 	PendingEmailSubj string // Email subject being composed
 	PendingPRTitle   string // PR title being created
+	PendingUpgradeReq  string // Feature request for self-upgrade
+	PendingUpgradePlan string // Copilot-generated upgrade plan
 	EnabledExtras    map[string]bool // Optional features pinned to main menu
 }
 

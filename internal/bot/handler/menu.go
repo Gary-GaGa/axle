@@ -57,6 +57,7 @@ var ExtraFeatures = []ExtraFeature{
 {"plugins", "🧩 擴充技能", "skill_plugins"},
 {"subagents", "👥 子代理", "skill_subagents"},
 {"scheduler", "⏰ 排程任務", "skill_scheduler"},
+{"selfupgrade", "🔧 自我升級", "skill_selfupgrade"},
 }
 
 // BtnExtras opens the extras toggle menu.
@@ -233,6 +234,17 @@ var (
 BtnPDFSummarize = PDFMenu.Data("📝 AI 摘要", "pdf_summarize")
 BtnPDFBack      = PDFMenu.Data("⬅️ 返回主選單", "back_main")
 )
+
+// ── Self-Upgrade menu ─────────────────────────────────────────────────────────
+
+var UpgradeMenu = &tele.ReplyMarkup{}
+
+var (
+BtnUpgradeConfirm = UpgradeMenu.Data("✅ 確認升級", "upgrade_confirm")
+BtnUpgradeCancel  = UpgradeMenu.Data("❌ 取消", "upgrade_cancel")
+)
+
+var BtnSelfUpgrade = tele.Btn{Unique: "skill_selfupgrade"}
 
 // ── Menu builders ─────────────────────────────────────────────────────────────
 
