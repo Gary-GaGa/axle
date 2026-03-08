@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Axle Web Gateway</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --soft: #1f2937;
+      --border: #334155;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: linear-gradient(180deg, #020617, var(--bg));
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .subtitle { color: var(--muted); margin-bottom: 24px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: rgba(17, 24, 39, 0.95);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+    }
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+    label {
+      display: block;
+      margin: 10px 0 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    input, textarea, button {
+      font: inherit;
+    }
+    input, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #020617;
+      color: var(--text);
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    button {
+      margin-top: 10px;
+      padding: 10px 14px;
+      border: none;
+      border-radius: 10px;
+      background: var(--accent);
+      color: #001018;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    button.secondary {
+      background: var(--soft);
+      color: var(--text);
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    pre {
+      margin: 12px 0 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      min-height: 72px;
+      color: #dbeafe;
+    }
+    .muted { color: var(--muted); }
+    .status { color: var(--ok); }
+    .error { color: #f87171; }
+    ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--accent);
+      font-size: 12px;
+      margin-right: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🌉 Axle Web Gateway</h1>
+    <div class="subtitle">第二通道：Web Chat + 記憶搜尋 + Browser + 背景工作流</div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h2>🔐 Gateway Token</h2>
+      <label for="token">Authorization Bearer Token</label>
+      <input id="token" placeholder="貼上 Telegram 顯示的 Web Gateway Token">
+      <div class="row">
+        <button onclick="saveToken()">儲存 Token</button>
+        <button class="secondary" onclick="loadStatus()">讀取狀態</button>
+      </div>
+      <pre id="statusBox">尚未讀取狀態</pre>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>💬 Web Chat</h2>
+        <label for="chatPrompt">Prompt</label>
+        <textarea id="chatPrompt" placeholder="例如：請幫我整理這個 repo 的架構與風險"></textarea>
+        <div class="row">
+          <button onclick="sendChat()">送出對話</button>
+        </div>
+        <pre id="chatBox">等待輸入…</pre>
+      </section>
+
+      <section class="card">
+        <h2>🧠 記憶 / 歷史</h2>
+        <label for="memoryQuery">搜尋關鍵字</label>
+        <input id="memoryQuery" placeholder="例如：weather、workflow、browser">
+        <div class="row">
+          <button onclick="searchMemory()">搜尋歷史</button>
+          <button class="secondary" onclick="loadRecentMemory()">最近記憶</button>
+          <button class="secondary" onclick="clearMemory()">清除記憶</button>
+        </div>
+        <pre id="memoryBox">等待操作…</pre>
+      </section>
+
+      <section class="card">
+        <h2>🌐 Browser 自動化</h2>
+        <div class="muted">僅支援安全讀取型操作：open / wait / extract / screenshot</div>
+        <label for="browserScript">腳本</label>
+        <textarea id="browserScript">open https://example.com
+wait 2s
+extract body
+screenshot .axle/browser/example-home.png</textarea>
+        <button onclick="runBrowser()">執行 Browser 腳本</button>
+        <pre id="browserBox">等待執行…</pre>
+      </section>
+
+      <section class="card">
+        <h2>🧭 背景工作流</h2>
+        <label for="workflowRequest">需求描述</label>
+        <textarea id="workflowRequest" placeholder="例如：分析這個 repo 的部署風險，必要時查文件，再整理成摘要"></textarea>
+        <div class="row">
+          <button onclick="createWorkflow()">建立工作流</button>
+          <button class="secondary" onclick="listWorkflows()">刷新列表</button>
+        </div>
+        <pre id="workflowBox">等待建立…</pre>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const tokenInput = document.getElementById('token');
+    tokenInput.value = sessionStorage.getItem('axleGatewayToken') || '';
+
+    function saveToken() {
+      sessionStorage.setItem('axleGatewayToken', tokenInput.value.trim());
+      alert('Token 已儲存');
+    }
+
+    function authHeaders(json = true) {
+      const token = (tokenInput.value || '').trim();
+      if (!token) throw new Error('請先輸入並儲存 Token');
+      const headers = { Authorization: `Bearer ${token}` };
+      if (json) headers['Content-Type'] = 'application/json';
+      return headers;
+    }
+
+    async function api(path, options = {}) {
+      const resp = await fetch(path, {
+        ...options,
+        headers: {
+          ...authHeaders(options.body !== undefined),
+          ...(options.headers || {}),
+        },
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data;
+    }
+
+    function pretty(obj) {
+      return typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
+    }
+
+    async function loadStatus() {
+      const box = document.getElementById('statusBox');
+      box.textContent = '載入中…';
+      try {
+        box.textContent = pretty(await api('/api/chat/status', { method: 'GET' }));
+      } catch (err) {
+        box.textContent = String(err);
+        box.className = 'error';
+      }
+    }
+
+    async function sendChat() {
+      const box = document.getElementById('chatBox');
+      box.textContent = '思考中…';
+      try {
+        const data = await api('/api/chat/send', {
+          method: 'POST',
+          body: JSON.stringify({ prompt: document.getElementById('chatPrompt').value }),
+        });
+        box.textContent = data.reply || '(空回應)';
+      } catch (err) {
+        box.textContent = String(err);
+      }
+    }
+
+    async function searchMemory() {
+      const box = document.getElementById('memoryBox');
+      box.textContent = '搜尋中…';
+      try {
+        const data = await api('/api/memory/search', {
+          method: 'POST',
+          body: JSON.stringify({ query: document.getElementById('memoryQuery').value, limit: 8 }),
+        });
+        box.textContent = pretty(data.hits || []);
+      } catch (err) {
+        box.textContent = String(err);
+      }
+    }
+
+    async function loadRecentMemory() {
+      const box = document.getElementById('memoryBox');
+      box.textContent = '載入最近記憶…';
+      try {
+        const data = await api('/api/memory/recent', { method: 'GET' });
+        box.textContent = pretty(data.entries || []);
+      } catch (err) {
+        box.textContent = String(err);
+      }
+    }
+
+    async function clearMemory() {
+      const box = document.getElementById('memoryBox');
+      box.textContent = '清除中…';
+      try {
+        await api('/api/memory/clear', { method: 'POST', body: JSON.stringify({}) });
+        box.textContent = '記憶已清除';
+      } catch (err) {
+        box.textContent = String(err);
+      }
+    }
+
+    async function runBrowser() {
+      const box = document.getElementById('browserBox');
+      box.textContent = 'Browser 執行中…';
+      try {
+        const data = await api('/api/browser/run', {
+          method: 'POST',
+          body: JSON.stringify({ script: document.getElementById('browserScript').value }),
+        });
+        box.textContent = pretty(data);
+      } catch (err) {
+        box.textContent = String(err);
+      }
+    }
+
+    async function createWorkflow() {
+      const box = document.getElementById('workflowBox');
+      box.textContent = '建立工作流中…';
+      try {
+        const data = await api('/api/workflows', {
+          method: 'POST',
+          body: JSON.stringify({ request: document.getElementById('workflowRequest').value }),
+        });
+        box.textContent = '已建立：\n' + pretty(data);
+      } catch (err) {
+        box.textContent = String(err);
+      }
+    }
+
+    async function listWorkflows() {
+      const box = document.getElementById('workflowBox');
+      box.textContent = '讀取工作流列表…';
+      try {
+        const data = await api('/api/workflows', { method: 'GET' });
+        box.textContent = pretty(data.workflows || []);
+      } catch (err) {
+        box.textContent = String(err);
+      }
+    }
+
+    loadStatus().catch(() => {});
+    listWorkflows().catch(() => {});
+  </script>
+</body>
+</html>

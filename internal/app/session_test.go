@@ -55,6 +55,25 @@ func TestSessionManager_Reset_PreservesModel(t *testing.T) {
 	}
 }
 
+func TestSessionManager_GetCopy_ClonesExtras(t *testing.T) {
+	sm := NewSessionManager()
+	sm.Update(123, func(s *UserSession) {
+		s.EnabledExtras = map[string]bool{"memory": true}
+	})
+
+	sess := sm.GetCopy(123)
+	sess.EnabledExtras["memory"] = false
+	sess.EnabledExtras["browser"] = true
+
+	again := sm.GetCopy(123)
+	if !again.EnabledExtras["memory"] {
+		t.Fatal("stored extras should not be mutated through GetCopy result")
+	}
+	if again.EnabledExtras["browser"] {
+		t.Fatal("new keys added to copied extras should not affect stored session")
+	}
+}
+
 func TestTaskManager_TryStart(t *testing.T) {
 	tm := &TaskManager{}
 	ctx, ok := tm.TryStart("test-task")

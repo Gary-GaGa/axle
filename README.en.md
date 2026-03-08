@@ -46,8 +46,9 @@
 - 🔀 Git · 🐙 GitHub integration
 - 📧 Email · 📅 Calendar
 - 🔍 Web search · 🌐 URL fetch
-- 📄 PDF summary · 👥 Sub-agents
-- ⏰ Scheduled tasks · 🎮 RPG Dashboard
+- 🧠 Memory / History · 🌐 Browser
+- 👥 Sub-agents · 🧭 Background workflows
+- 🌉 Web Gateway · 🎮 RPG Dashboard
 
 </td>
 </tr>
@@ -56,6 +57,9 @@
 
 **✨ Signature Features**
 - 🔧 **Self-Upgrade**: Describe a feature → AI plans → auto-code → compile → test → restart
+- 🧠 **Long-Term Memory + RAG**: Searchable history with automatic relevant recall in Copilot prompts
+- 🌉 **Dual-Channel Access**: Telegram plus a local authenticated Web Gateway (default `127.0.0.1:8080`) for chat / browser / workflows
+- 🧭 **Background Workflows**: Plan 2-4 steps, run them in the background, and track status later
 - 🎮 **RPG Dashboard**: Pixel-art browser dashboard with level system and achievements
 - 🗣️ **Natural Language Routing**: Type anything to auto-enter AI chat — no button clicks needed
 
@@ -90,7 +94,8 @@ go build -o axle ./cmd/axle
 ./axle
 ```
 
-On first launch, Axle interactively asks for your **Telegram Bot Token** and **Telegram User ID**, saves them to `~/.axle/credentials.json` and never asks again.
+On first launch, Axle interactively asks for your **Telegram Bot Token** and **Telegram User ID**, saves them to `~/.axle/credentials.json` and never asks again.  
+The local Web Gateway Bearer token is also auto-generated on first boot and stored there.
 
 > 💡 For advanced configuration (multi-user, Email, GitHub) see the [Full Tutorial](docs/tutorial-en.md)
 
@@ -100,6 +105,7 @@ On first launch, Axle interactively asks for your **Telegram Bot Token** and **T
 
 - **Whitelist Stealth Mode**: Unauthorized users get zero response — the bot is invisible to them
 - **Sandboxed File System**: All operations confined to workspace, `../` escape blocked
+- **Local Web Gateway**: Binds to `127.0.0.1:8080` by default and requires a Bearer token for all gateway APIs
 - **3-Level Danger Detection**: ⛔ Blocked → ⚠️ Double-confirm → ✅ Normal confirm
 - **Human-in-the-Loop**: All shell commands require manual button confirmation
 
@@ -109,7 +115,7 @@ On first launch, Axle interactively asks for your **Telegram Bot Token** and **T
 
 ## 🎮 RPG Dashboard
 
-After launch, open `http://localhost:8080` to see a pixel-art real-time dashboard: character panel, quest scroll, battle log, skill stats. Level grows from 🟤 Apprentice to 🔴 Immortal Engine. XP persists across restarts.
+After launch, open `http://127.0.0.1:8080` to see a pixel-art real-time dashboard: character panel, quest scroll, battle log, skill stats. Level grows from 🟤 Apprentice to 🔴 Immortal Engine. XP persists across restarts.
 
 ---
 

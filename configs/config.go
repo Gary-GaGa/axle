@@ -1,6 +1,8 @@
 package configs
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,9 +12,11 @@ import (
 
 // Config holds all runtime configuration for the application.
 type Config struct {
-	TelegramToken  string
-	AllowedUserIDs []int64
-	Workspace      string
+	TelegramToken   string
+	AllowedUserIDs  []int64
+	Workspace       string
+	WebListenAddr   string
+	WebGatewayToken string
 	// Email (optional)
 	EmailAddress  string
 	EmailPassword string
@@ -49,6 +53,8 @@ func Load() (*Config, error) {
 	telegramToken := firstNonEmpty(viper.GetString("TELEGRAM_TOKEN"), stored.TelegramToken)
 	allowedRaw := firstNonEmpty(viper.GetString("ALLOWED_USER_IDS"), stored.AllowedUserIDs)
 	workspace := firstNonEmpty(viper.GetString("WORKSPACE"), stored.Workspace, ".")
+	webListenAddr := firstNonEmpty(viper.GetString("WEB_LISTEN_ADDR"), stored.WebListenAddr, "127.0.0.1:8080")
+	webGatewayToken := firstNonEmpty(viper.GetString("WEB_GATEWAY_TOKEN"), stored.WebGatewayToken)
 
 	// --- Interactive prompt for missing required fields ---
 	needsSave := false
@@ -69,9 +75,22 @@ func Load() (*Config, error) {
 		needsSave = true
 	}
 
+	if webGatewayToken == "" {
+		token, err := generateToken(24)
+		if err != nil {
+			return nil, fmt.Errorf("產生 Web Gateway Token 失敗: %w", err)
+		}
+		webGatewayToken = token
+		stored.WebGatewayToken = token
+		stored.WebListenAddr = webListenAddr
+		needsSave = true
+	}
+
 	// --- Persist to ~/.axle/credentials.json ---
 	if needsSave {
 		stored.Workspace = workspace
+		stored.WebListenAddr = webListenAddr
+		stored.WebGatewayToken = webGatewayToken
 		if err := saveStoredCreds(stored); err != nil {
 			slog.Warn("⚠ 憑證儲存失敗，下次啟動需重新輸入", "error", err)
 		} else {
@@ -87,16 +106,26 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		TelegramToken:  telegramToken,
-		AllowedUserIDs: ids,
-		Workspace:      workspace,
-		EmailAddress:   firstNonEmpty(viper.GetString("EMAIL_ADDRESS"), stored.EmailAddress),
-		EmailPassword:  firstNonEmpty(viper.GetString("EMAIL_PASSWORD"), stored.EmailPassword),
-		SMTPHost:       firstNonEmpty(viper.GetString("SMTP_HOST"), stored.SMTPHost, "smtp.gmail.com"),
-		SMTPPort:       firstNonEmpty(viper.GetString("SMTP_PORT"), stored.SMTPPort, "587"),
-		IMAPHost:       firstNonEmpty(viper.GetString("IMAP_HOST"), stored.IMAPHost, "imap.gmail.com"),
-		IMAPPort:       firstNonEmpty(viper.GetString("IMAP_PORT"), stored.IMAPPort, "993"),
+		TelegramToken:   telegramToken,
+		AllowedUserIDs:  ids,
+		Workspace:       workspace,
+		WebListenAddr:   webListenAddr,
+		WebGatewayToken: webGatewayToken,
+		EmailAddress:    firstNonEmpty(viper.GetString("EMAIL_ADDRESS"), stored.EmailAddress),
+		EmailPassword:   firstNonEmpty(viper.GetString("EMAIL_PASSWORD"), stored.EmailPassword),
+		SMTPHost:        firstNonEmpty(viper.GetString("SMTP_HOST"), stored.SMTPHost, "smtp.gmail.com"),
+		SMTPPort:        firstNonEmpty(viper.GetString("SMTP_PORT"), stored.SMTPPort, "587"),
+		IMAPHost:        firstNonEmpty(viper.GetString("IMAP_HOST"), stored.IMAPHost, "imap.gmail.com"),
+		IMAPPort:        firstNonEmpty(viper.GetString("IMAP_PORT"), stored.IMAPPort, "993"),
 	}, nil
+}
+
+func generateToken(byteLen int) (string, error) {
+	buf := make([]byte, byteLen)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func firstNonEmpty(vals ...string) string {

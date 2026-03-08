@@ -509,11 +509,29 @@ function renderAchievements() {
 
 function renderEvents() {
   const events = (state.events || []).slice(-5).reverse();
-  $('questList').innerHTML = events.map(e => {
-    const status = e.success ? '✅' : '❌';
-    const icon = SKILL_ICONS[e.skill_id] || '❓';
-    return `<li><span class="quest-status">${status}</span>${icon} ${e.skill_name}: ${truncate(e.detail, 30)}</li>`;
-  }).join('') || '<li><span class="quest-status">⏳</span> 等待冒險指令...</li>';
+  const list = $('questList');
+  list.innerHTML = '';
+
+  if (events.length === 0) {
+    const li = document.createElement('li');
+    const status = document.createElement('span');
+    status.className = 'quest-status';
+    status.textContent = '⏳';
+    li.appendChild(status);
+    li.appendChild(document.createTextNode(' 等待冒險指令...'));
+    list.appendChild(li);
+    return;
+  }
+
+  events.forEach((e) => {
+    const li = document.createElement('li');
+    const status = document.createElement('span');
+    status.className = 'quest-status';
+    status.textContent = e.success ? '✅' : '❌';
+    li.appendChild(status);
+    li.appendChild(document.createTextNode(`${SKILL_ICONS[e.skill_id] || '❓'} ${e.skill_name}: ${truncate(e.detail, 30)}`));
+    list.appendChild(li);
+  });
 }
 
 function addFeedItem(evt) {
@@ -525,12 +543,25 @@ function addFeedItem(evt) {
   const icon = SKILL_ICONS[evt.skill_id] || '❓';
   const xpText = evt.xp > 0 ? `+${evt.xp} XP` : '';
 
-  li.innerHTML = `
-    <span class="feed-time">${time}</span>
-    <span class="feed-icon">${icon}</span>
-    <span class="feed-text">${evt.skill_name} → ${truncate(evt.detail, 40)}</span>
-    <span class="feed-xp">${xpText}</span>
-  `;
+  const timeEl = document.createElement('span');
+  timeEl.className = 'feed-time';
+  timeEl.textContent = time;
+  li.appendChild(timeEl);
+
+  const iconEl = document.createElement('span');
+  iconEl.className = 'feed-icon';
+  iconEl.textContent = icon;
+  li.appendChild(iconEl);
+
+  const textEl = document.createElement('span');
+  textEl.className = 'feed-text';
+  textEl.textContent = `${evt.skill_name} → ${truncate(evt.detail, 40)}`;
+  li.appendChild(textEl);
+
+  const xpEl = document.createElement('span');
+  xpEl.className = 'feed-xp';
+  xpEl.textContent = xpText;
+  li.appendChild(xpEl);
   list.prepend(li);
 
   // Keep max 50
