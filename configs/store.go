@@ -12,15 +12,17 @@ const credsFileName = "credentials.json"
 
 // storedCreds is the schema persisted to ~/.axle/credentials.json.
 type storedCreds struct {
-	TelegramToken  string `json:"telegram_token,omitempty"`
-	AllowedUserIDs string `json:"allowed_user_ids,omitempty"`
-	Workspace      string `json:"workspace,omitempty"`
-	EmailAddress   string `json:"email_address,omitempty"`
-	EmailPassword  string `json:"email_password,omitempty"`
-	SMTPHost       string `json:"smtp_host,omitempty"`
-	SMTPPort       string `json:"smtp_port,omitempty"`
-	IMAPHost       string `json:"imap_host,omitempty"`
-	IMAPPort       string `json:"imap_port,omitempty"`
+	TelegramToken   string `json:"telegram_token,omitempty"`
+	AllowedUserIDs  string `json:"allowed_user_ids,omitempty"`
+	Workspace       string `json:"workspace,omitempty"`
+	WebListenAddr   string `json:"web_listen_addr,omitempty"`
+	WebGatewayToken string `json:"web_gateway_token,omitempty"`
+	EmailAddress    string `json:"email_address,omitempty"`
+	EmailPassword   string `json:"email_password,omitempty"`
+	SMTPHost        string `json:"smtp_host,omitempty"`
+	SMTPPort        string `json:"smtp_port,omitempty"`
+	IMAPHost        string `json:"imap_host,omitempty"`
+	IMAPPort        string `json:"imap_port,omitempty"`
 }
 
 // CredsFilePath returns the absolute path to the credentials file.

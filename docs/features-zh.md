@@ -48,6 +48,14 @@
 |------|------|----------|
 | 🔍 **Web 搜尋** | 透過 DuckDuckGo 搜尋（無需 API Key） | 無 |
 | 🌐 **Web 擷取** | 擷取任意 URL 的文字內容（最大 100 KB） | 無 |
+| 🌉 **Web Gateway** | 本地第二通道：Web Chat / 記憶搜尋 / Browser / 工作流 | 啟動 Axle 後使用 Token 登入 |
+
+### 記憶與知識
+
+| 功能 | 說明 |
+|------|------|
+| 🧠 **記憶 / 歷史** | 長期持久化聊天、工具輸出、工作流摘要；支援搜尋歷史 |
+| 🧩 **RAG Recall** | 每次 Copilot 對話會自動補入近期上下文與相關長期記憶 |
 
 ### Git & GitHub
 
@@ -77,7 +85,9 @@
 |------|------|
 | ⏰ **排程任務** | Cron 排程自動執行 Shell 指令，持久化 |
 | 👥 **子代理** | 委派子代理執行獨立任務，含清單管理 |
+| 🧭 **背景工作流** | 自動規劃 2-4 步驟，背景執行並可列出 / 取消 / 追蹤結果 |
 | 🧩 **擴充技能** | 載入 YAML 定義的自定義插件技能 |
+| 🌐 **Browser 自動化** | 透過 Safari 腳本執行 `open / wait / extract / screenshot` |
 
 ### 視覺化
 
@@ -96,6 +106,63 @@
 描述需求 → Copilot CLI 分析並規劃 → 人工確認 → 自動修改代碼 → 編譯 → 測試 → git commit → 重啟
 
 安全機制：人工確認計畫 / 失敗自動回滾 / 版本號自動遞增
+
+### 🧠 長期記憶 / 可搜尋歷史
+
+Axle 會持久化保存：
+- Telegram / Web Chat 對話
+- Browser 擷取摘要
+- Shell / 子代理 / 工作流結果
+
+並提供：
+- `🔎 搜尋歷史`
+- `🕘 最近對話`
+- 自動 RAG Recall（將相關記憶補入 Copilot Prompt）
+
+### 🌉 Web Gateway
+
+除了 Telegram 之外，Axle 也提供本地 Web Gateway：
+- `GET /chat`：操作介面
+- `/api/chat/send`：Web Chat
+- `/api/memory/*`：記憶搜尋 / 最近記憶 / 清除
+- `/api/browser/run`：Browser 腳本
+- `/api/workflows*`：建立 / 列表 / 取消工作流
+
+採用 **Bearer Token** 驗證，Token 會自動生成並保存在 `~/.axle/credentials.json`。  
+Gateway 預設只監聽 `127.0.0.1:8080`，且 API 僅接受 `Authorization: Bearer <token>`。
+
+### 🌐 Browser 自動化
+
+目前採 **安全讀取型 MVP**，支援：
+
+```text
+open https://example.com
+wait 2s
+extract body
+screenshot .axle/browser/example-home.png
+```
+
+說明：
+- `open`：開啟頁面
+- `wait`：等待 JS 頁面渲染
+- `extract`：擷取 `body` 或 CSS selector 文字
+- `screenshot`：將畫面存進目前 workspace
+
+安全限制：
+- 僅允許公開 `http/https` 網站
+- 封鎖 `localhost`、私有 IP、link-local 與常見內網主機
+- 所有輸出仍限制在目前 workspace
+
+### 🧭 背景工作流
+
+工作流可將複雜需求拆成 2-4 個步驟，於背景執行並持久化。  
+每個步驟目前可使用：
+- `copilot`
+- `browser`
+
+保護措施：
+- 同一使用者最多同時執行 3 個背景工作流
+- 系統整體最多同時保留 8 個執行中的背景工作流
 
 ### 🗣️ 自然語言路由
 

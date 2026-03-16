@@ -16,8 +16,8 @@ import (
 	"github.com/garyellow/axle/internal/bot/skill"
 	"github.com/garyellow/axle/internal/web"
 
-	tele "gopkg.in/telebot.v3"
 	mw "github.com/garyellow/axle/internal/bot/middleware"
+	tele "gopkg.in/telebot.v3"
 )
 
 func main() {
@@ -60,6 +60,8 @@ func main() {
 	hub := handler.NewHub(tasks, sessions, bot, cfg.Workspace)
 	hub.AllowedUserIDs = cfg.AllowedUserIDs
 	hub.RestartCh = make(chan struct{})
+	hub.WebListenAddr = cfg.WebListenAddr
+	hub.WebGatewayToken = cfg.WebGatewayToken
 
 	// Determine Axle source directory (for self-upgrade)
 	if exe, err := os.Executable(); err == nil {
@@ -89,14 +91,35 @@ func main() {
 		slog.Warn("記憶系統初始化失敗", "error", err)
 	} else {
 		hub.Memory = memory
+		loadFailures := 0
 		for _, uid := range cfg.AllowedUserIDs {
-			_ = memory.Load(uid)
+			if err := memory.Load(uid); err != nil {
+				loadFailures++
+				slog.Warn("記憶載入失敗", "user_id", uid, "error", err)
+			}
 		}
-		slog.Info("✅ 記憶系統已載入")
+		if err := memory.Load(app.WebGatewayUserID); err != nil {
+			loadFailures++
+			slog.Warn("記憶載入失敗", "user_id", app.WebGatewayUserID, "error", err)
+		}
+		if loadFailures == 0 {
+			slog.Info("✅ 記憶系統已載入")
+		} else {
+			slog.Warn("⚠️ 記憶系統部分載入失敗", "failures", loadFailures)
+		}
 	}
 
 	// --- Sub-agent manager ---
 	hub.SubAgents = app.NewSubAgentManager()
+
+	// --- Workflow manager ---
+	workflows, err := app.NewWorkflowManager(axleDir, hub.Memory)
+	if err != nil {
+		slog.Warn("工作流系統初始化失敗", "error", err)
+	} else {
+		hub.Workflows = workflows
+		slog.Info("✅ 工作流系統已載入")
+	}
 
 	// --- Plugin manager ---
 	plugins, err := app.NewPluginManager(axleDir)
@@ -161,7 +184,7 @@ func main() {
 	rpg := app.NewRPGManager(axleDir)
 	hub.RPG = rpg
 
-	webSrv := web.NewServer(":8080", rpg)
+	webSrv := web.NewServer(cfg.WebListenAddr, rpg, tasks, hub.Memory, hub.Workflows, cfg.Workspace, cfg.WebGatewayToken)
 	webSrv.Start()
 
 	// --- Middleware: Auth Whitelist ---
@@ -183,10 +206,14 @@ func main() {
 	bot.Handle(&handler.BtnCopilot, hub.HandleCopilotBtn)
 	bot.Handle(&handler.BtnWebSearch, hub.HandleWebSearchBtn)
 	bot.Handle(&handler.BtnWebFetch, hub.HandleWebFetchBtn)
+	bot.Handle(&handler.BtnMemory, hub.HandleMemoryBtn)
+	bot.Handle(&handler.BtnBrowser, hub.HandleBrowserBtn)
 	bot.Handle(&handler.BtnGit, hub.HandleGitBtn)
 	bot.Handle(&handler.BtnPlugins, hub.HandlePluginsBtn)
 	bot.Handle(&handler.BtnSubAgents, hub.HandleSubAgentsBtn)
+	bot.Handle(&handler.BtnWorkflows, hub.HandleWorkflowsBtn)
 	bot.Handle(&handler.BtnScheduler, hub.HandleSchedulerBtn)
+	bot.Handle(&handler.BtnGateway, hub.HandleGatewayBtn)
 	bot.Handle(&handler.BtnSwitchModel, hub.HandleSwitchModelBtn)
 	bot.Handle(&handler.BtnSwitchProject, hub.HandleSwitchProjectBtn)
 	bot.Handle(&handler.BtnStatus, hub.HandleStatus)
@@ -220,6 +247,20 @@ func main() {
 	bot.Handle(&handler.BtnSubAgentCreate, hub.HandleSubAgentCreate)
 	bot.Handle(&handler.BtnSubAgentList, hub.HandleSubAgentList)
 	bot.Handle(&handler.BtnSubAgentCancel, hub.HandleSubAgentCancel)
+
+	// --- Memory ---
+	bot.Handle(&handler.BtnMemorySearch, hub.HandleMemorySearch)
+	bot.Handle(&handler.BtnMemoryRecent, hub.HandleMemoryRecent)
+	bot.Handle(&handler.BtnMemoryClear, hub.HandleMemoryClear)
+
+	// --- Browser ---
+	bot.Handle(&handler.BtnBrowserRun, hub.HandleBrowserRun)
+	bot.Handle(&handler.BtnBrowserExamples, hub.HandleBrowserExamples)
+
+	// --- Workflows ---
+	bot.Handle(&handler.BtnWorkflowCreate, hub.HandleWorkflowCreate)
+	bot.Handle(&handler.BtnWorkflowList, hub.HandleWorkflowList)
+	bot.Handle(&handler.BtnWorkflowCancel, hub.HandleWorkflowCancel)
 
 	// --- Plugins ---
 	bot.Handle(&handler.BtnPluginExec, hub.HandlePluginExec)
@@ -281,7 +322,9 @@ func main() {
 			if scheduler != nil {
 				scheduler.StopAll()
 			}
-			webSrv.Shutdown()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			webSrv.Shutdown(shutdownCtx)
+			cancel()
 
 			notifyDone := make(chan struct{})
 			go func() {
@@ -308,7 +351,9 @@ func main() {
 			if scheduler != nil {
 				scheduler.StopAll()
 			}
-			webSrv.Shutdown()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			webSrv.Shutdown(shutdownCtx)
+			cancel()
 			bot.Stop()
 
 			// Re-exec the new binary

@@ -24,40 +24,43 @@ type RPGSkillDef struct {
 
 // SkillDefs is the complete skill → RPG mapping.
 var SkillDefs = map[string]RPGSkillDef{
-	"read_code":    {ID: "read_code", Name: "Code Scan", Icon: "👁", Type: "偵查", XP: 5, Sprite: "scan"},
-	"write_file":   {ID: "write_file", Name: "Rune Carving", Icon: "✏️", Type: "創造", XP: 10, Sprite: "carve"},
-	"exec_shell":   {ID: "exec_shell", Name: "Shell Strike", Icon: "🗡", Type: "攻擊", XP: 15, Sprite: "strike"},
-	"copilot":      {ID: "copilot", Name: "AI Summon", Icon: "🔮", Type: "魔法", XP: 25, Sprite: "summon"},
+	"read_code":      {ID: "read_code", Name: "Code Scan", Icon: "👁", Type: "偵查", XP: 5, Sprite: "scan"},
+	"write_file":     {ID: "write_file", Name: "Rune Carving", Icon: "✏️", Type: "創造", XP: 10, Sprite: "carve"},
+	"exec_shell":     {ID: "exec_shell", Name: "Shell Strike", Icon: "🗡", Type: "攻擊", XP: 15, Sprite: "strike"},
+	"copilot":        {ID: "copilot", Name: "AI Summon", Icon: "🔮", Type: "魔法", XP: 25, Sprite: "summon"},
 	"copilot_stream": {ID: "copilot_stream", Name: "Thunder Stream", Icon: "⚡", Type: "持續魔法", XP: 30, Sprite: "thunder"},
-	"web_search":   {ID: "web_search", Name: "Oracle Vision", Icon: "🔍", Type: "偵查", XP: 10, Sprite: "oracle"},
-	"web_fetch":    {ID: "web_fetch", Name: "Portal Fetch", Icon: "🌐", Type: "傳送", XP: 10, Sprite: "portal"},
-	"git_status":   {ID: "git_status", Name: "Compass Check", Icon: "🧭", Type: "導航", XP: 5, Sprite: "compass"},
-	"git_diff":     {ID: "git_diff", Name: "Change Sight", Icon: "📊", Type: "偵查", XP: 5, Sprite: "sight"},
-	"git_push":     {ID: "git_push", Name: "Warp Push", Icon: "🚀", Type: "傳送", XP: 20, Sprite: "warp"},
-	"search_code":  {ID: "search_code", Name: "Deep Scan", Icon: "🔎", Type: "偵查", XP: 10, Sprite: "deepscan"},
-	"list_dir":     {ID: "list_dir", Name: "Map Reveal", Icon: "🗺", Type: "探索", XP: 5, Sprite: "map"},
-	"send_email":   {ID: "send_email", Name: "Messenger Hawk", Icon: "📨", Type: "通訊", XP: 15, Sprite: "hawk"},
-	"read_email":   {ID: "read_email", Name: "Mail Check", Icon: "📬", Type: "通訊", XP: 5, Sprite: "mail"},
-	"calendar":     {ID: "calendar", Name: "Time Sight", Icon: "📅", Type: "預知", XP: 5, Sprite: "hourglass"},
-	"briefing":     {ID: "briefing", Name: "Morning Report", Icon: "📜", Type: "情報", XP: 20, Sprite: "scroll"},
-	"sub_agent":    {ID: "sub_agent", Name: "Summon Companion", Icon: "👥", Type: "召喚", XP: 30, Sprite: "companion"},
-	"plugin":       {ID: "plugin", Name: "Equip Artifact", Icon: "🧩", Type: "裝備", XP: 15, Sprite: "artifact"},
-	"safety_block": {ID: "safety_block", Name: "Safety Ward", Icon: "🛡", Type: "防禦", XP: 0, Sprite: "shield"},
-	"pdf":          {ID: "pdf", Name: "Scroll Decode", Icon: "📄", Type: "解讀", XP: 10, Sprite: "decode"},
-	"image":        {ID: "image", Name: "Vision Lens", Icon: "📸", Type: "偵查", XP: 10, Sprite: "lens"},
-	"github":       {ID: "github", Name: "Guild Board", Icon: "📋", Type: "情報", XP: 10, Sprite: "guild"},
-	"self_upgrade":  {ID: "self_upgrade", Name: "Self Evolution", Icon: "🔧", Type: "進化", XP: 50, Sprite: "evolve"},
+	"web_search":     {ID: "web_search", Name: "Oracle Vision", Icon: "🔍", Type: "偵查", XP: 10, Sprite: "oracle"},
+	"web_fetch":      {ID: "web_fetch", Name: "Portal Fetch", Icon: "🌐", Type: "傳送", XP: 10, Sprite: "portal"},
+	"memory":         {ID: "memory", Name: "Memory Archive", Icon: "🧠", Type: "知識", XP: 8, Sprite: "memory"},
+	"browser":        {ID: "browser", Name: "Browser Scout", Icon: "🌐", Type: "探索", XP: 18, Sprite: "browser"},
+	"git_status":     {ID: "git_status", Name: "Compass Check", Icon: "🧭", Type: "導航", XP: 5, Sprite: "compass"},
+	"git_diff":       {ID: "git_diff", Name: "Change Sight", Icon: "📊", Type: "偵查", XP: 5, Sprite: "sight"},
+	"git_push":       {ID: "git_push", Name: "Warp Push", Icon: "🚀", Type: "傳送", XP: 20, Sprite: "warp"},
+	"search_code":    {ID: "search_code", Name: "Deep Scan", Icon: "🔎", Type: "偵查", XP: 10, Sprite: "deepscan"},
+	"list_dir":       {ID: "list_dir", Name: "Map Reveal", Icon: "🗺", Type: "探索", XP: 5, Sprite: "map"},
+	"send_email":     {ID: "send_email", Name: "Messenger Hawk", Icon: "📨", Type: "通訊", XP: 15, Sprite: "hawk"},
+	"read_email":     {ID: "read_email", Name: "Mail Check", Icon: "📬", Type: "通訊", XP: 5, Sprite: "mail"},
+	"calendar":       {ID: "calendar", Name: "Time Sight", Icon: "📅", Type: "預知", XP: 5, Sprite: "hourglass"},
+	"briefing":       {ID: "briefing", Name: "Morning Report", Icon: "📜", Type: "情報", XP: 20, Sprite: "scroll"},
+	"sub_agent":      {ID: "sub_agent", Name: "Summon Companion", Icon: "👥", Type: "召喚", XP: 30, Sprite: "companion"},
+	"workflow":       {ID: "workflow", Name: "Quest Chain", Icon: "🧭", Type: "協作", XP: 35, Sprite: "workflow"},
+	"plugin":         {ID: "plugin", Name: "Equip Artifact", Icon: "🧩", Type: "裝備", XP: 15, Sprite: "artifact"},
+	"safety_block":   {ID: "safety_block", Name: "Safety Ward", Icon: "🛡", Type: "防禦", XP: 0, Sprite: "shield"},
+	"pdf":            {ID: "pdf", Name: "Scroll Decode", Icon: "📄", Type: "解讀", XP: 10, Sprite: "decode"},
+	"image":          {ID: "image", Name: "Vision Lens", Icon: "📸", Type: "偵查", XP: 10, Sprite: "lens"},
+	"github":         {ID: "github", Name: "Guild Board", Icon: "📋", Type: "情報", XP: 10, Sprite: "guild"},
+	"self_upgrade":   {ID: "self_upgrade", Name: "Self Evolution", Icon: "🔧", Type: "進化", XP: 50, Sprite: "evolve"},
 }
 
 // ── Level system ─────────────────────────────────────────────────────────────
 
 // LevelInfo describes a level tier.
 type LevelInfo struct {
-	Level    int    `json:"level"`
-	Title    string `json:"title"`
-	TitleEN  string `json:"title_en"`
-	Icon     string `json:"icon"`
-	MinXP    int    `json:"min_xp"`
+	Level   int    `json:"level"`
+	Title   string `json:"title"`
+	TitleEN string `json:"title_en"`
+	Icon    string `json:"icon"`
+	MinXP   int    `json:"min_xp"`
 }
 
 // LevelTiers defines all level boundaries.
@@ -127,32 +130,32 @@ const (
 
 // RPGState holds the persistent RPG progression data.
 type RPGState struct {
-	TotalXP       int            `json:"total_xp"`
-	Level         int            `json:"level"`
-	SkillUses     map[string]int `json:"skill_uses"`
-	Achievements  []string       `json:"achievements"`
-	Events        []RPGEvent     `json:"events"`
-	TotalTasks    int            `json:"total_tasks"`
-	StartedAt     time.Time      `json:"started_at"`
-	Equipment     RPGEquipment   `json:"equipment"`
+	TotalXP      int            `json:"total_xp"`
+	Level        int            `json:"level"`
+	SkillUses    map[string]int `json:"skill_uses"`
+	Achievements []string       `json:"achievements"`
+	Events       []RPGEvent     `json:"events"`
+	TotalTasks   int            `json:"total_tasks"`
+	StartedAt    time.Time      `json:"started_at"`
+	Equipment    RPGEquipment   `json:"equipment"`
 }
 
 // RPGEquipment represents the agent's current "gear".
 type RPGEquipment struct {
-	Weapon     string `json:"weapon"`      // current AI model
-	Armor      string `json:"armor"`       // auth mode
-	Accessory  string `json:"accessory"`   // workspace
-	Companions int    `json:"companions"`  // sub-agent count
+	Weapon     string `json:"weapon"`     // current AI model
+	Armor      string `json:"armor"`      // auth mode
+	Accessory  string `json:"accessory"`  // workspace
+	Companions int    `json:"companions"` // sub-agent count
 }
 
 // ── RPG Manager ──────────────────────────────────────────────────────────────
 
 // RPGManager manages the RPG state and event broadcasting.
 type RPGManager struct {
-	mu        sync.RWMutex
-	state     RPGState
-	baseDir   string
-	listeners []chan RPGEvent
+	mu         sync.RWMutex
+	state      RPGState
+	baseDir    string
+	listeners  []chan RPGEvent
 	listenerMu sync.Mutex
 }
 
@@ -287,19 +290,19 @@ func (m *RPGManager) broadcast(evt RPGEvent) {
 
 func (m *RPGManager) checkAchievements() {
 	checks := map[string]bool{
-		"first_blood":     m.state.TotalTasks >= 1,
-		"10_tasks":        m.state.TotalTasks >= 10,
-		"100_tasks":       m.state.TotalTasks >= 100,
-		"500_tasks":       m.state.TotalTasks >= 500,
-		"first_summon":    m.state.SkillUses["copilot"] >= 1,
-		"10_summons":      m.state.SkillUses["copilot"] >= 10,
-		"first_strike":    m.state.SkillUses["exec_shell"] >= 1,
-		"code_scanner":    m.state.SkillUses["read_code"] >= 20,
-		"git_master":      m.state.SkillUses["git_push"] >= 10,
-		"multi_skilled":   len(m.state.SkillUses) >= 10,
-		"level_10":        m.state.Level >= 10,
-		"level_25":        m.state.Level >= 25,
-		"level_50":        m.state.Level >= 50,
+		"first_blood":   m.state.TotalTasks >= 1,
+		"10_tasks":      m.state.TotalTasks >= 10,
+		"100_tasks":     m.state.TotalTasks >= 100,
+		"500_tasks":     m.state.TotalTasks >= 500,
+		"first_summon":  m.state.SkillUses["copilot"] >= 1,
+		"10_summons":    m.state.SkillUses["copilot"] >= 10,
+		"first_strike":  m.state.SkillUses["exec_shell"] >= 1,
+		"code_scanner":  m.state.SkillUses["read_code"] >= 20,
+		"git_master":    m.state.SkillUses["git_push"] >= 10,
+		"multi_skilled": len(m.state.SkillUses) >= 10,
+		"level_10":      m.state.Level >= 10,
+		"level_25":      m.state.Level >= 25,
+		"level_50":      m.state.Level >= 50,
 	}
 
 	have := make(map[string]bool, len(m.state.Achievements))

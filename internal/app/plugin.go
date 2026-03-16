@@ -13,11 +13,11 @@ import (
 
 // Plugin represents a user-defined skill loaded from a YAML config file.
 type Plugin struct {
-	Name        string `yaml:"name" json:"name"`
-	Description string `yaml:"description" json:"description"`
-	Command     string `yaml:"command" json:"command"`
-	Confirm     bool   `yaml:"confirm" json:"confirm"`     // require confirmation before exec
-	UseWorkspace bool  `yaml:"workspace" json:"workspace"` // run in current workspace
+	Name         string `yaml:"name" json:"name"`
+	Description  string `yaml:"description" json:"description"`
+	Command      string `yaml:"command" json:"command"`
+	Confirm      bool   `yaml:"confirm" json:"confirm"`     // require confirmation before exec
+	UseWorkspace bool   `yaml:"workspace" json:"workspace"` // run in current workspace
 }
 
 // PluginManager loads and manages user-defined plugins.

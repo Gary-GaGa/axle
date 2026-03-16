@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,6 +30,7 @@ func (h *Hub) HandleText(c tele.Context) error {
 			s.Mode = app.ModeAwaitCopilotPrompt // NLP routing: enter copilot session
 		case app.ModeAwaitReadPath,
 			app.ModeAwaitWebSearch, app.ModeAwaitWebURL,
+			app.ModeAwaitMemorySearch, app.ModeAwaitBrowserScript, app.ModeAwaitWorkflowRequest,
 			app.ModeAwaitProjectPath,
 			app.ModeAwaitListPath, app.ModeAwaitSearchQuery:
 			s.Mode = app.ModeIdle // consume: next message starts fresh
@@ -111,6 +113,15 @@ func (h *Hub) HandleText(c tele.Context) error {
 
 	case app.ModeAwaitWebURL:
 		return h.execWebFetch(c, text)
+
+	case app.ModeAwaitMemorySearch:
+		return h.execMemorySearch(c, text)
+
+	case app.ModeAwaitBrowserScript:
+		return h.execBrowserScript(c, text)
+
+	case app.ModeAwaitWorkflowRequest:
+		return h.execCreateWorkflow(c, text)
 
 	case app.ModeAwaitProjectPath:
 		return h.handleProjectPathInput(c, text)
@@ -321,6 +332,86 @@ func (h *Hub) execWebFetch(c tele.Context, rawURL string) error {
 	return nil
 }
 
+// execMemorySearch searches long-term memory/history.
+func (h *Hub) execMemorySearch(c tele.Context, query string) error {
+	userID := c.Sender().ID
+	slog.Info("🧠 搜尋歷史", "query", query, "user_id", userID)
+
+	if h.Memory == nil {
+		return h.sendMenu(c, "⚠️ 記憶系統未初始化")
+	}
+
+	hits := h.Memory.Search(userID, query, 8)
+	if len(hits) == 0 {
+		h.emitRPG("memory", query, true)
+		return c.Send("🔎 沒有找到相關記憶", MemoryMenu)
+	}
+	h.emitRPG("memory", query, true)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("🔎 *記憶搜尋結果*：`%s`\n\n", query))
+	for i, hit := range hits {
+		ts := hit.Entry.Timestamp.Format("01-02 15:04")
+		sb.WriteString(fmt.Sprintf("%d. `%s` [%s/%s] 分數:%d\n", i+1, ts, hit.Entry.Source, hit.Entry.Kind, hit.Score))
+		sb.WriteString(hit.Snippet)
+		sb.WriteString("\n\n")
+	}
+	return c.Send(sb.String(), MemoryMenu, tele.ModeMarkdown)
+}
+
+// execBrowserScript executes a browser automation script in the background.
+func (h *Hub) execBrowserScript(c tele.Context, scriptInput string) error {
+	userID := c.Sender().ID
+	chat := c.Chat()
+	slog.Info("🌐 Browser 腳本", "user_id", userID)
+
+	if _, err := skill.ParseBrowserScript(scriptInput); err != nil {
+		return c.Send("❌ 腳本格式錯誤："+err.Error(), BrowserMenu)
+	}
+
+	ctx, done, ok := h.tryStartTask(c, fmt.Sprintf("Browser[%d]", userID))
+	if !ok {
+		return nil
+	}
+
+	c.Send("🌐 Browser 腳本執行中...", tele.ModeMarkdown)
+	go func() {
+		defer done()
+
+		result, err := skill.RunBrowserScript(ctx, h.workspaceFor(userID), scriptInput)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				h.Bot.Send(chat, "🛑 Browser 任務已取消", h.mmFor(userID))
+			} else {
+				h.Bot.Send(chat, "❌ Browser 任務失敗："+err.Error(), BrowserMenu)
+			}
+			h.emitRPG("browser", "script failed", false)
+			return
+		}
+
+		h.recordMemory(userID, app.MemoryEntry{
+			Role:      "tool",
+			Content:   result.Summary(),
+			Kind:      "browser",
+			Source:    "telegram",
+			Workspace: h.workspaceFor(userID),
+			Tags:      append([]string{"browser"}, result.Screenshots...),
+		})
+		h.emitRPG("browser", result.URL, true)
+
+		message := "✅ *Browser 任務完成*\n\n" + result.Summary()
+		chunks := skill.SplitMessage(message)
+		for i, chunk := range chunks {
+			if i == len(chunks)-1 {
+				h.Bot.Send(chat, chunk, BrowserMenu, tele.ModeMarkdown)
+			} else {
+				h.Bot.Send(chat, chunk, tele.ModeMarkdown)
+			}
+		}
+	}()
+	return nil
+}
+
 // ── Workspace switch flow ─────────────────────────────────────────────────────
 
 // handleProjectPathInput validates and sets the user's active workspace.
@@ -459,6 +550,15 @@ func (h *Hub) execCreateSubAgent(c tele.Context, name, task string) error {
 			h.SubAgents.Fail(agent.ID, err.Error())
 			h.Bot.Send(chat, fmt.Sprintf("❌ 子代理 `%s` 失敗：%s", agent.ID, err.Error()), h.mmFor(userID))
 			h.emitRPG("sub_agent", name, false)
+			h.recordMemory(userID, app.MemoryEntry{
+				Role:      "system",
+				Content:   fmt.Sprintf("Sub-agent %s failed: %s", agent.ID, err.Error()),
+				Model:     model,
+				Kind:      "subagent",
+				Source:    "telegram",
+				Workspace: ws,
+				Tags:      []string{"subagent", agent.ID},
+			})
 			return
 		}
 
@@ -467,6 +567,15 @@ func (h *Hub) execCreateSubAgent(c tele.Context, name, task string) error {
 			result += ch
 		}
 		h.SubAgents.Complete(agent.ID, result)
+		h.recordMemory(userID, app.MemoryEntry{
+			Role:      "tool",
+			Content:   fmt.Sprintf("Sub-agent %s completed: %s", agent.ID, result),
+			Model:     model,
+			Kind:      "subagent",
+			Source:    "telegram",
+			Workspace: ws,
+			Tags:      []string{"subagent", agent.ID},
+		})
 		h.emitRPG("sub_agent", name, true)
 
 		msg := fmt.Sprintf("✅ 子代理 `%s` 完成\n\n%s", agent.ID, result)
@@ -475,6 +584,45 @@ func (h *Hub) execCreateSubAgent(c tele.Context, name, task string) error {
 	}()
 
 	return nil
+}
+
+// execCreateWorkflow creates and runs a background workflow.
+func (h *Hub) execCreateWorkflow(c tele.Context, request string) error {
+	userID := c.Sender().ID
+	slog.Info("🧭 建立工作流", "request", request, "user_id", userID)
+
+	if h.Workflows == nil {
+		return h.sendMenu(c, "⚠️ 工作流系統未初始化")
+	}
+
+	sess := h.Sessions.GetCopy(userID)
+	model := sess.SelectedModel
+	if model == "" {
+		model = skill.DefaultModel
+	}
+
+	chat := c.Chat()
+	wf, err := h.Workflows.StartRequest(userID, request, model, h.workspaceFor(userID), "telegram", func(n app.WorkflowNotice) {
+		// Only send meaningful milestone notifications to avoid flooding.
+		switch n.Status {
+		case app.WorkflowRunning:
+			if strings.Contains(n.Message, "已完成規劃") {
+				h.Bot.Send(chat, n.Message, WorkflowMenu, tele.ModeMarkdown)
+			}
+		case app.WorkflowCompleted, app.WorkflowFailed, app.WorkflowCancelled:
+			h.Bot.Send(chat, n.Message, WorkflowMenu, tele.ModeMarkdown)
+		}
+	})
+	if err != nil {
+		return h.sendMenu(c, "❌ 建立工作流失敗："+err.Error())
+	}
+
+	h.emitRPG("workflow", request, true)
+	return c.Send(
+		fmt.Sprintf("🧭 工作流 `%s` 已建立\n\n需求：%s\n模型：`%s`\n\n🧠 先規劃，再於背景執行；可稍後在「🧭 工作流」查看進度。", wf.ID, request, model),
+		WorkflowMenu,
+		tele.ModeMarkdown,
+	)
 }
 
 // ── Schedule creation ─────────────────────────────────────────────────────────

@@ -46,8 +46,9 @@
 - 🔀 Git · 🐙 GitHub 整合
 - 📧 Email · 📅 行事曆
 - 🔍 Web 搜尋 · 🌐 URL 擷取
-- 📄 PDF 摘要 · 👥 子代理
-- ⏰ 排程任務 · 🎮 RPG Dashboard
+- 🧠 記憶 / 歷史 · 🌐 Browser
+- 👥 子代理 · 🧭 背景工作流
+- 🌉 Web Gateway · 🎮 RPG Dashboard
 
 </td>
 </tr>
@@ -56,6 +57,9 @@
 
 **✨ 特色功能**
 - 🔧 **自我升級**：描述需求 → AI 規劃 → 自動修改代碼 → 編譯測試 → 重啟
+- 🧠 **長期記憶 + RAG**：可搜尋歷史，並自動將相關記憶補進 Copilot Prompt
+- 🌉 **雙通道互動**：除了 Telegram，還可用本地 Web Gateway（預設 `127.0.0.1:8080`）操作聊天 / Browser / 工作流
+- 🧭 **背景工作流**：先規劃 2-4 個步驟，再於背景執行與追蹤
 - 🎮 **RPG Dashboard**：瀏覽器即時監控，像素風格，含等級與成就系統
 - 🗣️ **自然語言路由**：直接輸入文字自動進入 AI 對話
 
@@ -90,7 +94,8 @@ go build -o axle ./cmd/axle
 ./axle
 ```
 
-首次啟動時，Axle 會互動式詢問 **Telegram Bot Token** 和 **你的 Telegram User ID**，設定後自動儲存至 `~/.axle/credentials.json`，下次啟動免設定。
+首次啟動時，Axle 會互動式詢問 **Telegram Bot Token** 和 **你的 Telegram User ID**，設定後自動儲存至 `~/.axle/credentials.json`，下次啟動免設定。  
+本地 Web Gateway 的 Bearer Token 也會在首次啟動時自動產生並一併保存。
 
 > 💡 進階設定（多用戶、Email、GitHub）請見 [完整教學](docs/tutorial-zh.md)
 
@@ -100,6 +105,7 @@ go build -o axle ./cmd/axle
 
 - **白名單隱形模式**：未授權用戶發訊息完全無回應
 - **沙箱檔案系統**：所有操作嚴格限制在 workspace，禁止 `../` 逃逸
+- **本地 Web Gateway**：預設只監聽 `127.0.0.1:8080`，所有 Gateway API 需 Bearer Token
 - **三級危險偵測**：⛔ 封鎖 → ⚠️ 二次確認 → ✅ 一般確認
 - **Human-in-the-Loop**：Shell 指令執行前必須人工按鈕確認
 
@@ -109,7 +115,7 @@ go build -o axle ./cmd/axle
 
 ## 🎮 RPG Dashboard
 
-啟動後自動開啟 `http://localhost:8080`，即時顯示 Agent 工作狀態（角色面板 / 任務卷軸 / 戰鬥日誌 / 技能統計）。等級從 🟤 見習編碼師 成長到 🔴 不朽引擎，XP 持久化重啟不歸零。
+啟動後自動開啟 `http://127.0.0.1:8080`，即時顯示 Agent 工作狀態（角色面板 / 任務卷軸 / 戰鬥日誌 / 技能統計）。等級從 🟤 見習編碼師 成長到 🔴 不朽引擎，XP 持久化重啟不歸零。
 
 ---
 

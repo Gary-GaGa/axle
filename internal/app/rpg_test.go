@@ -99,7 +99,11 @@ func TestRPGManager_Subscribe(t *testing.T) {
 	ch := m.Subscribe()
 	defer m.Unsubscribe(ch)
 
-	go m.EmitEvent("exec_shell", "ls", true)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		m.EmitEvent("exec_shell", "ls", true)
+	}()
 
 	select {
 	case evt := <-ch:
@@ -109,6 +113,7 @@ func TestRPGManager_Subscribe(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for event")
 	}
+	<-done
 }
 
 func TestRPGManager_Achievements(t *testing.T) {
@@ -182,7 +187,10 @@ func TestRPGManager_UpdateEquipment(t *testing.T) {
 }
 
 func TestItoa(t *testing.T) {
-	tests := []struct{ n int; want string }{
+	tests := []struct {
+		n    int
+		want string
+	}{
 		{0, "0"}, {1, "1"}, {42, "42"}, {100, "100"},
 	}
 	for _, tt := range tests {

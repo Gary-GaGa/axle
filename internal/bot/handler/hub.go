@@ -18,19 +18,22 @@ const chunkSendDelay = 300 * time.Millisecond // rate-limit between Telegram mes
 // Hub holds shared dependencies for all bot handlers.
 // All fields are safe for concurrent use.
 type Hub struct {
-	Tasks     *app.TaskManager
-	Sessions  *app.SessionManager
-	Bot       *tele.Bot
-	Workspace string
-	SourceDir string // Axle source code directory for self-upgrade
-	Memory    *app.MemoryStore
-	SubAgents *app.SubAgentManager
-	Plugins   *app.PluginManager
-	Scheduler *app.ScheduleManager
-	RPG       *app.RPGManager
-	AllowedUserIDs []int64
-	EmailConfig    *skill.EmailConfig
-	RestartCh      chan struct{} // signal main goroutine to restart
+	Tasks           *app.TaskManager
+	Sessions        *app.SessionManager
+	Bot             *tele.Bot
+	Workspace       string
+	SourceDir       string // Axle source code directory for self-upgrade
+	Memory          *app.MemoryStore
+	SubAgents       *app.SubAgentManager
+	Workflows       *app.WorkflowManager
+	Plugins         *app.PluginManager
+	Scheduler       *app.ScheduleManager
+	RPG             *app.RPGManager
+	AllowedUserIDs  []int64
+	WebListenAddr   string
+	WebGatewayToken string
+	EmailConfig     *skill.EmailConfig
+	RestartCh       chan struct{} // signal main goroutine to restart
 }
 
 // NewHub creates a Hub wired with the provided dependencies.
@@ -58,6 +61,15 @@ func (h *Hub) workspaceFor(userID int64) string {
 func (h *Hub) emitRPG(skillID, detail string, success bool) {
 	if h.RPG != nil {
 		h.RPG.EmitEvent(skillID, detail, success)
+	}
+}
+
+func (h *Hub) recordMemory(userID int64, entry app.MemoryEntry) {
+	if h.Memory == nil {
+		return
+	}
+	if err := h.Memory.AddDetailed(userID, entry); err != nil {
+		slog.Warn("⚠️ 記憶寫入失敗", "user_id", userID, "kind", entry.Kind, "source", entry.Source, "error", err)
 	}
 }
 
@@ -181,14 +193,38 @@ func (h *Hub) RunExecTask(c tele.Context, command string) error {
 			slog.Info("🛑 Shell 任務已取消", "user_id", userID)
 			h.Bot.Send(chat, "🛑 指令執行已取消", h.mmFor(userID))
 			h.emitRPG("exec_shell", command, false)
+			h.recordMemory(userID, app.MemoryEntry{
+				Role:      "system",
+				Content:   "Shell command cancelled: " + command,
+				Kind:      "exec",
+				Source:    "telegram",
+				Workspace: h.workspaceFor(userID),
+				Tags:      []string{"shell"},
+			})
 		case err != nil:
 			slog.Error("❌ Shell 任務失敗", "error", err)
 			h.Bot.Send(chat, "❌ "+err.Error(), h.mmFor(userID))
 			h.emitRPG("exec_shell", command, false)
+			h.recordMemory(userID, app.MemoryEntry{
+				Role:      "system",
+				Content:   "Shell command failed: " + command + "\n" + err.Error(),
+				Kind:      "exec",
+				Source:    "telegram",
+				Workspace: h.workspaceFor(userID),
+				Tags:      []string{"shell"},
+			})
 		default:
 			slog.Info("✅ Shell 任務完成", "user_id", userID)
 			h.sendChunks(chat, skill.SplitMessage("```\n"+out+"\n```"), userID)
 			h.emitRPG("exec_shell", command, true)
+			h.recordMemory(userID, app.MemoryEntry{
+				Role:      "tool",
+				Content:   "Shell command completed: " + command + "\n" + out,
+				Kind:      "exec",
+				Source:    "telegram",
+				Workspace: h.workspaceFor(userID),
+				Tags:      []string{"shell"},
+			})
 		}
 	}()
 	return nil
@@ -202,31 +238,34 @@ func (h *Hub) RunExecTask(c tele.Context, command string) error {
 func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 	userID := c.Sender().ID
 	chat := c.Chat()
+	workspace := h.workspaceFor(userID)
 
 	if model == "" {
 		model = skill.DefaultModel
 	}
 
-	// Save user prompt to memory
-	if h.Memory != nil {
-		_ = h.Memory.Add(userID, "user", prompt, model)
+	ctx, done, ok := h.tryStartTask(c, fmt.Sprintf("Copilot[%d]", userID))
+	if !ok {
+		return nil
 	}
 
-	// Build context from memory
 	contextPrefix := ""
 	if h.Memory != nil {
-		contextPrefix = h.Memory.BuildContext(userID, 10)
+		contextPrefix = h.Memory.BuildContext(userID, 8) + h.Memory.BuildRAGContext(userID, prompt, 4)
+		h.recordMemory(userID, app.MemoryEntry{
+			Role:      "user",
+			Content:   prompt,
+			Model:     model,
+			Kind:      "chat",
+			Source:    "telegram",
+			Workspace: workspace,
+		})
 	}
 
 	fullPrompt := contextPrefix + prompt
 	truncWarning := ""
 	if len(fullPrompt) > skill.MaxPromptChars {
 		truncWarning = fmt.Sprintf("\n⚠️ 提示詞過長，已截斷至 %d 字元", skill.MaxPromptChars)
-	}
-
-	ctx, done, ok := h.tryStartTask(c, fmt.Sprintf("Copilot[%d]", userID))
-	if !ok {
-		return nil
 	}
 
 	slog.Info("🤖 啟動 Copilot 任務", "model", model, "user_id", userID)
@@ -264,7 +303,7 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 			lastEdit = time.Now()
 		}
 
-		result, err := skill.RunCopilotStream(ctx, h.workspaceFor(userID), model, fullPrompt, onUpdate)
+		result, err := skill.RunCopilotStream(ctx, workspace, model, fullPrompt, onUpdate)
 
 		switch {
 		case errors.Is(err, context.Canceled):
@@ -286,9 +325,14 @@ func (h *Hub) RunCopilotTask(c tele.Context, prompt, model string) error {
 		default:
 			slog.Info("✅ Copilot 任務完成", "len", len(result), "user_id", userID)
 			h.emitRPG("copilot_stream", fmt.Sprintf("%d 字元", len(result)), true)
-			if h.Memory != nil {
-				_ = h.Memory.Add(userID, "assistant", result, model)
-			}
+			h.recordMemory(userID, app.MemoryEntry{
+				Role:      "assistant",
+				Content:   result,
+				Model:     model,
+				Kind:      "chat",
+				Source:    "telegram",
+				Workspace: workspace,
+			})
 
 			chunks := skill.SplitMessage(result)
 			if len(chunks) == 1 && sentMsg != nil {

@@ -40,10 +40,9 @@ func RunCopilot(ctx context.Context, workspace, model, prompt string) ([]string,
 	cmd := exec.CommandContext(ctx, "copilot",
 		"--model", model,
 		"-p", prompt,
-		"--allow-all-tools",  // required for non-interactive mode
-		"--allow-all-paths",  // needed when workspace is not home dir
-		"--silent",           // output only the agent response
-		"--no-color",         // no ANSI codes in output
+		"--allow-all-tools", // required for non-interactive mode
+		"--silent",          // output only the agent response
+		"--no-color",        // no ANSI codes in output
 		"--add-dir", absWorkspace,
 	)
 	cmd.Dir = absWorkspace
@@ -102,7 +101,6 @@ func RunCopilotStream(ctx context.Context, workspace, model, prompt string, onUp
 		"--model", model,
 		"-p", prompt,
 		"--allow-all-tools",
-		"--allow-all-paths",
 		"--silent",
 		"--no-color",
 		"--add-dir", absWorkspace,

@@ -12,7 +12,7 @@ import (
 type SubAgentStatus int
 
 const (
-	SubAgentRunning   SubAgentStatus = iota
+	SubAgentRunning SubAgentStatus = iota
 	SubAgentCompleted
 	SubAgentFailed
 	SubAgentCancelled

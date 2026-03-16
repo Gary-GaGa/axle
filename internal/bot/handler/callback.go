@@ -111,6 +111,12 @@ func (h *Hub) HandleStatus(c tele.Context) error {
 		schedCount = len(h.Scheduler.List())
 	}
 
+	// Workflow count
+	workflowCount := 0
+	if h.Workflows != nil {
+		workflowCount = h.Workflows.RunningCount(c.Sender().ID)
+	}
+
 	return c.Send(fmt.Sprintf(
 		"📊 *系統狀態*\n\n"+
 			"• 版本：`v%s`\n"+
@@ -119,9 +125,10 @@ func (h *Hub) HandleStatus(c tele.Context) error {
 			"• Workspace：`%s`\n"+
 			"• 對話記憶：%d 筆\n"+
 			"• 子代理：%d 個執行中\n"+
+			"• 工作流：%d 個執行中\n"+
 			"• 擴充技能：%d 個\n"+
 			"• 排程任務：%d 個",
-		app.Version, taskStatus, model, wsLabel, memCount, agentCount, pluginCount, schedCount,
+		app.Version, taskStatus, model, wsLabel, memCount, agentCount, workflowCount, pluginCount, schedCount,
 	), h.mm(c), tele.ModeMarkdown)
 }
 
@@ -337,6 +344,138 @@ func (h *Hub) HandleWebFetchBtn(c tele.Context) error {
 	_ = c.Respond()
 	h.Sessions.Update(userID, func(s *app.UserSession) { s.Mode = app.ModeAwaitWebURL })
 	return c.Send("🌐 *Web 擷取*\n\n請輸入網址（URL）\n範例：`https://example.com`", tele.ModeMarkdown)
+}
+
+// HandleMemoryBtn shows the memory/history submenu.
+func (h *Hub) HandleMemoryBtn(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🔘 選單: 記憶 / 歷史", "user_id", userID)
+	_ = c.Respond()
+
+	if h.Memory == nil {
+		return h.sendMenu(c, "⚠️ 記憶系統未初始化")
+	}
+
+	return c.Send(
+		fmt.Sprintf("🧠 *記憶 / 歷史*\n\n目前已儲存：%d 筆\n\n請選擇操作：", h.Memory.Count(userID)),
+		MemoryMenu,
+		tele.ModeMarkdown,
+	)
+}
+
+// HandleMemorySearch starts the memory search flow.
+func (h *Hub) HandleMemorySearch(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🧠 搜尋歷史", "user_id", userID)
+	_ = c.Respond()
+	h.Sessions.Update(userID, func(s *app.UserSession) { s.Mode = app.ModeAwaitMemorySearch })
+	return c.Send("🔎 *搜尋歷史*\n\n請輸入關鍵字：\n範例：`Taipei weather`", tele.ModeMarkdown)
+}
+
+// HandleMemoryRecent shows the most recent memory entries.
+func (h *Hub) HandleMemoryRecent(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🧠 最近對話", "user_id", userID)
+	_ = c.Respond()
+
+	if h.Memory == nil {
+		return c.Send("⚠️ 記憶系統未初始化", MemoryMenu)
+	}
+
+	entries := h.Memory.Recent(userID, 10)
+	if len(entries) == 0 {
+		return c.Send("🕘 目前沒有任何記憶紀錄", MemoryMenu)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("🕘 *最近對話 / 工具歷史*\n\n")
+	for _, entry := range entries {
+		ts := entry.Timestamp.Format("01-02 15:04")
+		sb.WriteString(fmt.Sprintf("• `%s` [%s/%s] %s\n", ts, entry.Source, entry.Kind, truncateForView(entry.Content, 160)))
+		sb.WriteString("\n")
+	}
+	return c.Send(sb.String(), MemoryMenu, tele.ModeMarkdown)
+}
+
+// HandleMemoryClear clears all memory for the current user.
+func (h *Hub) HandleMemoryClear(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Warn("🧹 清除記憶", "user_id", userID)
+	_ = c.Respond()
+
+	if h.Memory == nil {
+		return c.Send("⚠️ 記憶系統未初始化", MemoryMenu)
+	}
+	if err := h.Memory.Clear(userID); err != nil {
+		return c.Send("❌ 清除失敗："+err.Error(), MemoryMenu)
+	}
+	return c.Send("🧹 記憶已清除", MemoryMenu)
+}
+
+// HandleBrowserBtn shows the browser submenu.
+func (h *Hub) HandleBrowserBtn(c tele.Context) error {
+	slog.Info("🔘 選單: Browser", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	return c.Send("🌐 *Browser 自動化*\n\n支援 `open / wait / extract / screenshot` 的安全腳本。", BrowserMenu, tele.ModeMarkdown)
+}
+
+// HandleBrowserRun starts the browser script input flow.
+func (h *Hub) HandleBrowserRun(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🌐 Browser 執行腳本", "user_id", userID)
+	_ = c.Respond()
+	h.Sessions.Update(userID, func(s *app.UserSession) { s.Mode = app.ModeAwaitBrowserScript })
+	return c.Send(
+		"▶️ *Browser 腳本*\n\n請貼上腳本：\n\n```text\nopen https://example.com\nwait 2s\nextract body\nscreenshot .axle/browser/example.png\n```",
+		tele.ModeMarkdown,
+	)
+}
+
+// HandleBrowserExamples shows example browser scripts.
+func (h *Hub) HandleBrowserExamples(c tele.Context) error {
+	slog.Info("🌐 Browser 範例", "user_id", c.Sender().ID)
+	_ = c.Respond()
+	return c.Send(
+		"📘 *Browser 腳本範例*\n\n"+
+			"```text\n"+
+			"open https://example.com\n"+
+			"wait 2s\n"+
+			"extract body\n"+
+			"screenshot .axle/browser/example-home.png\n"+
+			"```\n\n"+
+			"• `open`：開啟頁面\n"+
+			"• `wait`：等待頁面渲染\n"+
+			"• `extract`：擷取 body 或 CSS selector 文字\n"+
+			"• `screenshot`：將視窗畫面存進 workspace",
+		BrowserMenu,
+		tele.ModeMarkdown,
+	)
+}
+
+// HandleGatewayBtn shows local web gateway information.
+func (h *Hub) HandleGatewayBtn(c tele.Context) error {
+	slog.Info("🌉 Web Gateway", "user_id", c.Sender().ID)
+	_ = c.Respond()
+
+	webURL := "http://127.0.0.1" + h.WebListenAddr
+	if strings.HasPrefix(h.WebListenAddr, "127.0.0.1") || strings.HasPrefix(h.WebListenAddr, "localhost") {
+		webURL = "http://" + h.WebListenAddr
+	}
+
+	return c.Send(
+		fmt.Sprintf("🌉 *Web Gateway*\n\n"+
+			"網址：`%s/chat`\n"+
+			"Token：`%s`\n\n"+
+			"可用功能：\n"+
+			"• Web Chat 第二通道\n"+
+			"• 搜尋歷史 / 最近記憶\n"+
+			"• Browser 腳本執行\n"+
+			"• 工作流建立 / 查詢 / 取消",
+			webURL, h.WebGatewayToken,
+		),
+		h.mm(c),
+		tele.ModeMarkdown,
+	)
 }
 
 // ── Workspace switch ──────────────────────────────────────────────────────────
@@ -652,6 +791,102 @@ func (h *Hub) HandleSubAgentCancel(c tele.Context) error {
 		return c.Send("ℹ️ 該代理不在執行中或不存在", SubAgentMenu)
 	}
 	return c.Send(fmt.Sprintf("🛑 子代理 `%s` 已取消", agentID), h.mm(c), tele.ModeMarkdown)
+}
+
+// ── Workflow buttons ───────────────────────────────────────────────────────────
+
+// HandleWorkflowsBtn shows the workflow submenu.
+func (h *Hub) HandleWorkflowsBtn(c tele.Context) error {
+	slog.Info("🔘 選單: 工作流", "user_id", c.Sender().ID)
+	_ = c.Respond()
+
+	count := 0
+	if h.Workflows != nil {
+		count = h.Workflows.RunningCount(c.Sender().ID)
+	}
+
+	return c.Send(
+		fmt.Sprintf("🧭 *背景工作流*\n\n執行中的工作流：%d\n\n請選擇操作：", count),
+		WorkflowMenu,
+		tele.ModeMarkdown,
+	)
+}
+
+// HandleWorkflowCreate starts the workflow request flow.
+func (h *Hub) HandleWorkflowCreate(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🧭 建立工作流", "user_id", userID)
+	_ = c.Respond()
+	h.Sessions.Update(userID, func(s *app.UserSession) { s.Mode = app.ModeAwaitWorkflowRequest })
+	return c.Send(
+		"🧭 *建立背景工作流*\n\n請描述想交給 Axle 背景執行的工作：\n\n_例如：分析這個 repo 的安全風險，若需要可查官方文件，再整理成摘要。_",
+		tele.ModeMarkdown,
+	)
+}
+
+// HandleWorkflowList lists workflows for the current user.
+func (h *Hub) HandleWorkflowList(c tele.Context) error {
+	userID := c.Sender().ID
+	slog.Info("🧭 查看工作流", "user_id", userID)
+	_ = c.Respond()
+
+	if h.Workflows == nil {
+		return c.Send("⚠️ 工作流系統未初始化", WorkflowMenu)
+	}
+
+	workflows := h.Workflows.List(userID)
+	if len(workflows) == 0 {
+		return c.Send("📋 目前沒有任何工作流", WorkflowMenu)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📋 *工作流清單*\n\n")
+	m := &tele.ReplyMarkup{}
+	var rows []tele.Row
+	for _, wf := range workflows {
+		sb.WriteString(fmt.Sprintf("• `%s` — %s\n", wf.ID, wf.Status.Label()))
+		sb.WriteString(fmt.Sprintf("  需求：%s\n", truncateForView(wf.Request, 120)))
+		if len(wf.Steps) > 0 {
+			sb.WriteString(fmt.Sprintf("  步驟：%d\n", len(wf.Steps)))
+		}
+		if wf.ResultSummary != "" {
+			sb.WriteString(fmt.Sprintf("  摘要：%s\n", truncateForView(wf.ResultSummary, 140)))
+		}
+		if wf.Error != "" {
+			sb.WriteString(fmt.Sprintf("  錯誤：%s\n", truncateForView(wf.Error, 140)))
+		}
+		sb.WriteString("\n")
+
+		if wf.Status == app.WorkflowPlanning || wf.Status == app.WorkflowRunning {
+			rows = append(rows, m.Row(
+				m.Data(fmt.Sprintf("🛑 取消 %s", wf.ID), "workflow_cancel", wf.ID),
+			))
+		}
+	}
+	rows = append(rows, m.Row(m.Data("⬅️ 返回主選單", "back_main")))
+	m.Inline(rows...)
+
+	return c.Send(sb.String(), m, tele.ModeMarkdown)
+}
+
+// HandleWorkflowCancel cancels a running workflow.
+func (h *Hub) HandleWorkflowCancel(c tele.Context) error {
+	_ = c.Respond()
+	args := c.Args()
+	if len(args) < 1 || h.Workflows == nil {
+		return c.Send("⚠️ 工作流參數錯誤", WorkflowMenu)
+	}
+
+	workflowID := args[0]
+	wf, ok := h.Workflows.Get(workflowID)
+	if !ok || wf.UserID != c.Sender().ID {
+		return c.Send("ℹ️ 找不到此工作流", WorkflowMenu)
+	}
+	slog.Info("🛑 取消工作流", "id", workflowID, "user_id", c.Sender().ID)
+	if !h.Workflows.Cancel(workflowID) {
+		return c.Send("ℹ️ 該工作流不在執行中或不存在", WorkflowMenu)
+	}
+	return c.Send(fmt.Sprintf("🛑 工作流 `%s` 已取消", workflowID), h.mm(c), tele.ModeMarkdown)
 }
 
 // ── Plugin buttons ────────────────────────────────────────────────────────────
@@ -1418,4 +1653,12 @@ func (h *Hub) HandleUpgradeCancel(c tele.Context) error {
 	_ = c.Respond()
 	h.Sessions.Reset(c.Sender().ID)
 	return h.sendMenu(c, "❌ 自我升級已取消")
+}
+
+func truncateForView(s string, max int) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
