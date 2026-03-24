@@ -426,7 +426,7 @@ func (h *Hub) HandleBrowserRun(c tele.Context) error {
 	_ = c.Respond()
 	h.Sessions.Update(userID, func(s *app.UserSession) { s.Mode = app.ModeAwaitBrowserScript })
 	return c.Send(
-		"▶️ *Browser 腳本*\n\n請貼上腳本：\n\n```text\nopen https://example.com\nwait 2s\nextract body\nscreenshot .axle/browser/example.png\n```",
+		"▶️ *Browser 腳本*\n\n請貼上腳本：\n\n```text\nopen https://1.1.1.1\nwait 2s\nextract body\nscreenshot .axle/browser/example.png\n```",
 		tele.ModeMarkdown,
 	)
 }
@@ -438,7 +438,7 @@ func (h *Hub) HandleBrowserExamples(c tele.Context) error {
 	return c.Send(
 		"📘 *Browser 腳本範例*\n\n"+
 			"```text\n"+
-			"open https://example.com\n"+
+			"open https://1.1.1.1\n"+
 			"wait 2s\n"+
 			"extract body\n"+
 			"screenshot .axle/browser/example-home.png\n"+

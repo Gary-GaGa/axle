@@ -241,19 +241,22 @@ func (h *Hub) showExecConfirm(c tele.Context, cmd string) error {
 func (h *Hub) handleWritePathInput(c tele.Context, relPath string) error {
 	slog.Info("✏️ 寫入路徑", "path", relPath, "user_id", c.Sender().ID)
 
-	exists, err := skill.FileExists(h.workspaceFor(c.Sender().ID), relPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	existsResult, err := skill.FileExistsDetailed(ctx, h.workspaceFor(c.Sender().ID), relPath)
 	if err != nil {
 		h.Sessions.Reset(c.Sender().ID)
 		return h.sendMenu(c, "❌ "+err.Error())
 	}
 
 	warning := ""
-	if exists {
+	if existsResult.Exists {
 		warning = "\n⚠️ *此檔案已存在，將會被覆蓋！*"
 	}
 
 	return c.Send(
-		fmt.Sprintf("✏️ 準備寫入：`%s`%s\n\n請輸入檔案內容：", relPath, warning),
+		fmt.Sprintf("✏️ 準備寫入：`%s`%s\n\n請輸入檔案內容：", existsResult.Path, warning),
 		tele.ModeMarkdown,
 	)
 }
@@ -262,13 +265,17 @@ func (h *Hub) handleWritePathInput(c tele.Context, relPath string) error {
 func (h *Hub) handleWriteContentInput(c tele.Context, relPath, content string) error {
 	slog.Info("✏️ 寫入檔案", "path", relPath, "size", len(content), "user_id", c.Sender().ID)
 
-	if err := skill.WriteFile(h.workspaceFor(c.Sender().ID), relPath, content); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	result, err := skill.WriteFileDetailed(ctx, h.workspaceFor(c.Sender().ID), relPath, content)
+	if err != nil {
 		h.emitRPG("write_file", relPath, false)
 		return h.sendMenu(c, "❌ "+err.Error())
 	}
-	h.emitRPG("write_file", relPath, true)
+	h.emitRPG("write_file", result.Path, true)
 
-	return h.sendMenu(c, fmt.Sprintf("✅ 檔案已寫入：`%s`（%d bytes）", relPath, len(content)))
+	return h.sendMenu(c, fmt.Sprintf("✅ 檔案已寫入：`%s`（%d bytes）", result.Path, result.BytesWritten))
 }
 
 // ── Web search/fetch ──────────────────────────────────────────────────────────
@@ -481,14 +488,14 @@ func (h *Hub) execSearchCode(c tele.Context, pattern string) error {
 	slog.Info("🔎 搜尋代碼", "pattern", pattern, "user_id", c.Sender().ID)
 	c.Send("🔎 搜尋中...")
 
-	results, err := skill.SearchCode(context.Background(), h.workspaceFor(c.Sender().ID), pattern)
+	results, err := skill.SearchCodeDetailed(context.Background(), h.workspaceFor(c.Sender().ID), pattern)
 	if err != nil {
 		h.emitRPG("search_code", pattern, false)
 		return h.sendMenu(c, "❌ 搜尋失敗："+err.Error())
 	}
 	h.emitRPG("search_code", pattern, true)
 
-	text := skill.FormatSearchResults(pattern, results)
+	text := skill.FormatSearchResults(pattern, results.Matches, results.Truncated)
 	chunks := skill.SplitMessage(text)
 	for i, chunk := range chunks {
 		if i == len(chunks)-1 {

@@ -1,63 +1,73 @@
 package skill
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
+	"context"
+
+	domainworkspace "github.com/garyellow/axle/internal/domain/workspace"
+	"github.com/garyellow/axle/internal/usecase/dto"
 )
 
-const maxWriteBytes = 1024 * 1024 // 1 MB safety limit
+const maxWriteBytes = domainworkspace.MaxWriteBytes
+
+// WriteResult summarizes a successful write through the compatibility wrapper.
+type WriteResult struct {
+	Path         string
+	BytesWritten int
+}
+
+// FileExistsResult summarizes a workspace existence check through the compatibility wrapper.
+type FileExistsResult struct {
+	Path   string
+	Exists bool
+}
 
 // WriteFile creates or overwrites a file within the workspace sandbox.
-// It enforces the same "../" escape prevention as ReadCode.
-// Parent directories are created automatically.
 func WriteFile(workspace, relPath, content string) error {
-	absTarget, err := resolveAndValidate(workspace, relPath)
-	if err != nil {
-		return err
-	}
-
-	if len(content) > maxWriteBytes {
-		return fmt.Errorf("⚠️ 內容超過 %d KB 上限，已拒絕寫入", maxWriteBytes/1024)
-	}
-
-	// Create parent directories
-	if err := os.MkdirAll(filepath.Dir(absTarget), 0755); err != nil {
-		return fmt.Errorf("建立目錄失敗: %w", err)
-	}
-
-	if err := os.WriteFile(absTarget, []byte(content), 0644); err != nil {
-		return fmt.Errorf("寫入失敗: %w", err)
-	}
-	return nil
+	_, err := WriteFileDetailed(context.Background(), workspace, relPath, content)
+	return err
 }
 
 // FileExists checks whether a file exists inside the workspace sandbox.
 func FileExists(workspace, relPath string) (bool, error) {
-	absTarget, err := resolveAndValidate(workspace, relPath)
+	result, err := FileExistsDetailed(context.Background(), workspace, relPath)
 	if err != nil {
 		return false, err
 	}
-	_, err = os.Stat(absTarget)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return err == nil, err
+	return result.Exists, nil
 }
 
-// resolveAndValidate resolves a relative path inside the workspace and ensures
-// it does not escape. Shared by ReadCode and WriteFile.
-func resolveAndValidate(workspace, relPath string) (string, error) {
-	absWorkspace, err := filepath.Abs(workspace)
+// WriteFileDetailed writes a file and preserves the normalized target path.
+func WriteFileDetailed(ctx context.Context, workspace, relPath, content string) (WriteResult, error) {
+	result, err := workspaceExplorer().WriteFile(ctx, dto.WriteFileInput{
+		Workspace: workspace,
+		Path:      relPath,
+		Content:   content,
+	})
 	if err != nil {
-		return "", fmt.Errorf("workspace 路徑解析失敗: %w", err)
+		return WriteResult{}, err
 	}
-	absTarget := filepath.Join(absWorkspace, filepath.Clean("/"+relPath))
+	return WriteResult{
+		Path:         result.Path,
+		BytesWritten: result.BytesWritten,
+	}, nil
+}
 
-	prefix := absWorkspace + string(os.PathSeparator)
-	if absTarget != absWorkspace && !strings.HasPrefix(absTarget, prefix) {
-		return "", fmt.Errorf("⛔ 安全拒絕：路徑 `%s` 逃逸 workspace", relPath)
+// FileExistsDetailed checks path existence and preserves the normalized target path.
+func FileExistsDetailed(ctx context.Context, workspace, relPath string) (FileExistsResult, error) {
+	result, err := workspaceExplorer().FileExists(ctx, dto.FileExistsInput{
+		Workspace: workspace,
+		Path:      relPath,
+	})
+	if err != nil {
+		return FileExistsResult{}, err
 	}
-	return absTarget, nil
+	return FileExistsResult{
+		Path:   result.Path,
+		Exists: result.Exists,
+	}, nil
+}
+
+// resolveAndValidate resolves a relative path inside the workspace and ensures it does not escape.
+func resolveAndValidate(workspace, relPath string) (string, error) {
+	return domainworkspace.ResolvePath(workspace, relPath)
 }

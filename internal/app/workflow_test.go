@@ -9,7 +9,8 @@ import (
 )
 
 func TestParseWorkflowPlan(t *testing.T) {
-	raw := "```json\n{\"steps\":[{\"id\":\"research\",\"name\":\"Research\",\"kind\":\"copilot\",\"prompt\":\"Analyze repo\"},{\"id\":\"browse\",\"name\":\"Browse docs\",\"kind\":\"browser\",\"script\":\"open https://example.com\\nwait 1s\\nextract body\",\"depends_on\":[\"research\"]}]}\n```"
+	t.Setenv("AXLE_ALLOW_UNSAFE_BROWSER", "1")
+	raw := "```json\n{\"steps\":[{\"id\":\"research\",\"name\":\"Research\",\"kind\":\"copilot\",\"prompt\":\"Analyze repo\"},{\"id\":\"browse\",\"name\":\"Browse docs\",\"kind\":\"browser\",\"script\":\"open https://1.1.1.1\\nwait 1s\\nextract body\",\"depends_on\":[\"research\"]}]}\n```"
 
 	steps, err := parseWorkflowPlan(raw)
 	if err != nil {
@@ -24,6 +25,7 @@ func TestParseWorkflowPlan(t *testing.T) {
 }
 
 func TestWorkflowManager_StartPlannedSuccess(t *testing.T) {
+	t.Setenv("AXLE_ALLOW_UNSAFE_BROWSER", "1")
 	dir := t.TempDir()
 	mem, _ := NewMemoryStore(dir)
 	wm, err := NewWorkflowManager(dir, mem)
@@ -42,7 +44,7 @@ func TestWorkflowManager_StartPlannedSuccess(t *testing.T) {
 
 	wf, err := wm.StartPlanned(123, "ship feature", "claude", "/tmp/project", "telegram", []WorkflowStep{
 		{ID: "plan", Name: "Plan", Kind: "copilot", Prompt: "make a plan"},
-		{ID: "browse", Name: "Browse", Kind: "browser", Script: "open https://example.com\nwait 1s\nextract body", DependsOn: []string{"plan"}},
+		{ID: "browse", Name: "Browse", Kind: "browser", Script: "open https://1.1.1.1\nwait 1s\nextract body", DependsOn: []string{"plan"}},
 	}, nil)
 	if err != nil {
 		t.Fatalf("StartPlanned: %v", err)
@@ -60,6 +62,10 @@ func TestWorkflowManager_StartPlannedSuccess(t *testing.T) {
 	}
 	if mem.Count(123) == 0 {
 		t.Fatal("workflow completion should be stored in memory")
+	}
+	recent := mem.Recent(123, 1)
+	if len(recent) != 1 || recent[0].Role != "tool" || recent[0].Kind != "workflow" {
+		t.Fatalf("workflow memory entry = %+v", recent)
 	}
 }
 
@@ -181,6 +187,46 @@ func TestWorkflowManager_CapacityLimit(t *testing.T) {
 		}
 		waitWorkflowStatus(t, wm, id, 3*time.Second)
 	}
+}
+
+func TestWorkflowManager_GetReturnsDeepCopy(t *testing.T) {
+	dir := t.TempDir()
+	wm, err := NewWorkflowManager(dir, nil)
+	if err != nil {
+		t.Fatalf("NewWorkflowManager: %v", err)
+	}
+
+	wm.SetRunners(
+		func(ctx context.Context, workspace, model, prompt string) (string, error) {
+			return "done", nil
+		},
+		nil,
+	)
+
+	wf, err := wm.StartPlanned(321, "copy", "claude", "/tmp/project", "telegram", []WorkflowStep{
+		{ID: "plan", Name: "Plan", Kind: "copilot"},
+		{ID: "run", Name: "Run", Kind: "copilot", DependsOn: []string{"plan"}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartPlanned: %v", err)
+	}
+
+	got, ok := wm.Get(wf.ID)
+	if !ok {
+		t.Fatalf("Get() returned not found")
+	}
+	got.Steps[1].DependsOn[0] = "tampered"
+
+	gotAgain, ok := wm.Get(wf.ID)
+	if !ok {
+		t.Fatalf("Get() returned not found on second read")
+	}
+	if gotAgain.Steps[1].DependsOn[0] != "plan" {
+		t.Fatalf("expected manager state to stay unchanged, got %+v", gotAgain.Steps[1].DependsOn)
+	}
+
+	wm.Cancel(wf.ID)
+	waitWorkflowStatus(t, wm, wf.ID, 3*time.Second)
 }
 
 func waitWorkflowStatus(t *testing.T, wm *WorkflowManager, id string, timeout time.Duration) Workflow {

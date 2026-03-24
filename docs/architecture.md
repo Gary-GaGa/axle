@@ -1,5 +1,7 @@
 # Axle — 架構與開發指南 / Architecture & Dev Guide
 
+> 正在進行 Clean Architecture + DDD 重構，請搭配閱讀 [`refactor-clean-ddd-direction.md`](refactor-clean-ddd-direction.md) 了解新的分層方向與遷移策略。
+
 [← 返回首頁 / Back to Home](../README.md)
 
 ---
@@ -7,6 +9,7 @@
 ## 目錄 / Contents
 
 - [目錄結構](#目錄結構)
+- [DDD/Clean 重構方向](refactor-clean-ddd-direction.md)
 - [設計原則](#設計原則)
 - [安全機制](#安全機制)
 - [並發模型](#並發模型)

@@ -136,22 +136,24 @@ Gateway 預設只監聽 `127.0.0.1:8080`，且 API 僅接受 `Authorization: Bea
 目前採 **安全讀取型 MVP**，支援：
 
 ```text
-open https://example.com
+open https://<public-ip>
 wait 2s
 extract body
-screenshot .axle/browser/example-home.png
+screenshot page.png
 ```
 
 說明：
 - `open`：開啟頁面
 - `wait`：等待 JS 頁面渲染
 - `extract`：擷取 `body` 或 CSS selector 文字
-- `screenshot`：將畫面存進目前 workspace
+- `screenshot`：將畫面存進本次 `.axle/browser/run-*` artifact 目錄
 
 安全限制：
-- 僅允許公開 `http/https` 網站
-- 封鎖 `localhost`、私有 IP、link-local 與常見內網主機
-- 所有輸出仍限制在目前 workspace
+- Browser automation **預設停用**
+- 如需自行承擔風險啟用，請設定環境變數 `AXLE_ALLOW_UNSAFE_BROWSER=1`
+- 即使啟用，Safari automation 仍不是完整的網路沙箱；請只對受信任的公開目標使用
+- 僅允許公開 `http/https` **public IP** 目標
+- 所有 screenshot / result 輸出仍限制在目前 workspace 的 `.axle/browser/run-*`
 
 ### 🧭 背景工作流
 

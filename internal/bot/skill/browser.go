@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,24 +13,24 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	infrafiles "github.com/garyellow/axle/internal/infrastructure/files"
+	"github.com/garyellow/axle/internal/usecase/browserdsl"
 )
 
 const (
 	defaultBrowserWait   = 1500 * time.Millisecond
 	maxBrowserTextChars  = 12000
-	defaultExtractTarget = "body"
+	defaultExtractTarget = browserdsl.DefaultExtractTarget
+	maxBrowserWait       = browserdsl.MaxWait
+	unsafeBrowserEnvKey  = "AXLE_ALLOW_UNSAFE_BROWSER"
 )
 
 // BrowserStep represents one browser automation step.
-type BrowserStep struct {
-	Action string `json:"action"`
-	Arg    string `json:"arg,omitempty"`
-}
+type BrowserStep = browserdsl.Step
 
 // BrowserPlan is a parsed browser script.
-type BrowserPlan struct {
-	Steps []BrowserStep `json:"steps"`
-}
+type BrowserPlan = browserdsl.Plan
 
 // BrowserRunResult contains the outputs from a browser automation run.
 type BrowserRunResult struct {
@@ -65,59 +64,7 @@ func (r BrowserRunResult) Summary() string {
 
 // ParseBrowserScript parses the small Axle browser DSL.
 func ParseBrowserScript(input string) (BrowserPlan, error) {
-	lines := strings.Split(input, "\n")
-	plan := BrowserPlan{Steps: make([]BrowserStep, 0, len(lines))}
-
-	for _, raw := range lines {
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		parts := strings.Fields(line)
-		if len(parts) == 0 {
-			continue
-		}
-
-		action := strings.ToLower(parts[0])
-		arg := strings.TrimSpace(strings.TrimPrefix(line, parts[0]))
-
-		switch action {
-		case "open":
-			if arg == "" {
-				return BrowserPlan{}, fmt.Errorf("browser script: open 缺少 URL")
-			}
-			parsed, err := url.Parse(strings.TrimSpace(arg))
-			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-				return BrowserPlan{}, fmt.Errorf("browser script: 無效 URL %q", arg)
-			}
-			if err := validateBrowserTarget(parsed); err != nil {
-				return BrowserPlan{}, err
-			}
-		case "wait":
-			if arg == "" {
-				return BrowserPlan{}, fmt.Errorf("browser script: wait 缺少 duration")
-			}
-			if _, err := time.ParseDuration(strings.TrimSpace(arg)); err != nil {
-				return BrowserPlan{}, fmt.Errorf("browser script: wait duration 無效: %w", err)
-			}
-		case "extract":
-			if strings.TrimSpace(arg) == "" {
-				arg = defaultExtractTarget
-			}
-		case "screenshot":
-			// empty path is allowed; a default artifact path will be generated
-		default:
-			return BrowserPlan{}, fmt.Errorf("browser script: 不支援的指令 %q", action)
-		}
-
-		plan.Steps = append(plan.Steps, BrowserStep{Action: action, Arg: strings.TrimSpace(arg)})
-	}
-
-	if len(plan.Steps) == 0 {
-		return BrowserPlan{}, fmt.Errorf("browser script 不能為空")
-	}
-	return plan, nil
+	return browserdsl.ParseScript(input)
 }
 
 // RunBrowserScript parses and executes a browser script.
@@ -131,17 +78,26 @@ func RunBrowserScript(ctx context.Context, workspace, script string) (BrowserRun
 
 // RunBrowserPlan executes a parsed browser plan via Safari on macOS.
 func RunBrowserPlan(ctx context.Context, workspace string, plan BrowserPlan) (BrowserRunResult, error) {
+	if err := validateBrowserPlan(plan); err != nil {
+		return BrowserRunResult{}, err
+	}
+	if os.Getenv(unsafeBrowserEnvKey) != "1" {
+		return BrowserRunResult{}, fmt.Errorf("browser automation 預設停用；如需自行承擔風險啟用，請設定 %s=1", unsafeBrowserEnvKey)
+	}
 	if runtime.GOOS != "darwin" {
 		return BrowserRunResult{}, fmt.Errorf("browser automation 目前僅支援 macOS Safari")
 	}
 
 	runID := fmt.Sprintf("run-%d", time.Now().UnixNano())
 	artifactRel := filepath.Join(".axle", "browser", runID)
-	artifactDir, err := resolveAndValidate(workspace, artifactRel)
+	root, _, err := infrafiles.OpenWorkspaceRoot(workspace)
 	if err != nil {
 		return BrowserRunResult{}, err
 	}
-	if err := os.MkdirAll(artifactDir, 0755); err != nil {
+	defer root.Close()
+
+	artifactDir, err := infrafiles.EnsureRootedDirectory(root, artifactRel, artifactRel, 0755)
+	if err != nil {
 		return BrowserRunResult{}, fmt.Errorf("建立 browser artifact 目錄失敗: %w", err)
 	}
 
@@ -182,6 +138,9 @@ func RunBrowserPlan(ctx context.Context, workspace string, plan BrowserPlan) (Br
 
 		case "wait":
 			d, _ := time.ParseDuration(step.Arg)
+			if err := validateBrowserWaitDuration(d); err != nil {
+				return BrowserRunResult{}, err
+			}
 			if err := sleepContext(ctx, d); err != nil {
 				return BrowserRunResult{}, err
 			}
@@ -208,14 +167,30 @@ func RunBrowserPlan(ctx context.Context, workspace string, plan BrowserPlan) (Br
 			if relPath == "" {
 				relPath = filepath.Join(artifactRel, fmt.Sprintf("step-%d.png", i+1))
 			}
-			absPath, err := resolveAndValidate(workspace, relPath)
+			relPath, err = normalizeBrowserScreenshotPath(artifactRel, relPath)
 			if err != nil {
 				return BrowserRunResult{}, err
 			}
-			if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
-				return BrowserRunResult{}, fmt.Errorf("建立 screenshot 目錄失敗: %w", err)
+
+			tmp, err := os.CreateTemp("", "axle-browser-*.png")
+			if err != nil {
+				return BrowserRunResult{}, fmt.Errorf("建立暫存 screenshot 檔案失敗: %w", err)
 			}
-			if err := safariScreenshot(ctx, absPath); err != nil {
+			tmpPath := tmp.Name()
+			if err := tmp.Close(); err != nil {
+				os.Remove(tmpPath)
+				return BrowserRunResult{}, fmt.Errorf("建立暫存 screenshot 檔案失敗: %w", err)
+			}
+			if err := safariScreenshot(ctx, tmpPath); err != nil {
+				os.Remove(tmpPath)
+				return BrowserRunResult{}, err
+			}
+			data, err := os.ReadFile(tmpPath)
+			os.Remove(tmpPath)
+			if err != nil {
+				return BrowserRunResult{}, fmt.Errorf("讀取暫存 screenshot 失敗: %w", err)
+			}
+			if err := infrafiles.WriteRootedFile(root, relPath, relPath, data, 0644); err != nil {
 				return BrowserRunResult{}, err
 			}
 			result.Screenshots = append(result.Screenshots, relPath)
@@ -224,10 +199,22 @@ func RunBrowserPlan(ctx context.Context, workspace string, plan BrowserPlan) (Br
 		result.ExecutedSteps = append(result.ExecutedSteps, step)
 	}
 
-	if err := writeBrowserResult(artifactDir, result); err != nil {
+	if err := writeBrowserResult(root, artifactDir, result); err != nil {
 		return BrowserRunResult{}, err
 	}
 	return result, nil
+}
+
+func validateBrowserPlan(plan BrowserPlan) error {
+	return browserdsl.ValidatePlan(plan)
+}
+
+func validateBrowserWaitDuration(d time.Duration) error {
+	return browserdsl.ValidateWaitDuration(d)
+}
+
+func normalizeBrowserScreenshotPath(artifactRel, relPath string) (string, error) {
+	return browserdsl.NormalizeScreenshotPath(artifactRel, relPath)
 }
 
 func safariOpenURL(ctx context.Context, rawURL string) error {
@@ -289,60 +276,24 @@ func safariScreenshot(ctx context.Context, absPath string) error {
 	return nil
 }
 
-func writeBrowserResult(artifactDir string, result BrowserRunResult) error {
+func writeBrowserResult(root *os.Root, artifactDir string, result BrowserRunResult) error {
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return fmt.Errorf("序列化 browser 結果失敗: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(artifactDir, "result.json"), data, 0644); err != nil {
+	resultPath := filepath.Join(artifactDir, "result.json")
+	if err := infrafiles.WriteRootedFile(root, resultPath, resultPath, data, 0644); err != nil {
 		return fmt.Errorf("寫入 browser 結果失敗: %w", err)
 	}
 	return nil
 }
 
 func validateBrowserTarget(parsed *url.URL) error {
-	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
-	if host == "" {
-		return fmt.Errorf("browser script: 無效 URL %q", parsed.String())
-	}
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") || !strings.Contains(host, ".") {
-		return fmt.Errorf("browser script: 禁止存取本機或內網位址 %q", parsed.String())
-	}
-	if isRebindingHost(host) {
-		return fmt.Errorf("browser script: 禁止存取可能映射到本機的網域 %q", parsed.String())
-	}
-
-	if ip := net.ParseIP(host); ip != nil {
-		if isPrivateBrowserIP(ip) {
-			return fmt.Errorf("browser script: 禁止存取本機或內網位址 %q", parsed.String())
-		}
-	}
-	return nil
+	return browserdsl.ValidateTarget(parsed)
 }
 
-func validateBrowserTargetResolved(ctx context.Context, parsed *url.URL) error {
-	if err := validateBrowserTarget(parsed); err != nil {
-		return err
-	}
-
-	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
-	if ip := net.ParseIP(host); ip != nil {
-		return nil
-	}
-
-	lookupCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	addrs, err := net.DefaultResolver.LookupIPAddr(lookupCtx, host)
-	if err != nil {
-		return fmt.Errorf("browser script: 無法驗證目標位址 %q", parsed.String())
-	}
-	for _, addr := range addrs {
-		if isPrivateBrowserIP(addr.IP) {
-			return fmt.Errorf("browser script: 禁止存取本機或內網位址 %q", parsed.String())
-		}
-	}
-	return nil
+func validateBrowserTargetResolved(_ context.Context, parsed *url.URL) error {
+	return validateBrowserTarget(parsed)
 }
 
 func preflightBrowserNavigation(ctx context.Context, rawURL string) (string, error) {
@@ -380,42 +331,6 @@ func preflightBrowserNavigation(ctx context.Context, rawURL string) (string, err
 		return resp.Request.URL.String(), nil
 	}
 	return parsed.String(), nil
-}
-
-func isPrivateBrowserIP(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() || ip.IsMulticast() || ip.IsUnspecified() {
-		return true
-	}
-
-	v4 := ip.To4()
-	if v4 == nil {
-		return false
-	}
-
-	switch {
-	case v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127:
-		return true
-	case v4[0] == 169 && v4[1] == 254:
-		return true
-	case v4[0] == 198 && (v4[1] == 18 || v4[1] == 19):
-		return true
-	default:
-		return false
-	}
-}
-
-func isRebindingHost(host string) bool {
-	switch {
-	case strings.HasSuffix(host, ".nip.io"),
-		strings.HasSuffix(host, ".sslip.io"),
-		strings.HasSuffix(host, ".xip.io"):
-		return true
-	default:
-		return false
-	}
 }
 
 func validateSafariCurrentPage(ctx context.Context) (string, error) {

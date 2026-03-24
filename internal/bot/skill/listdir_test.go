@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -78,6 +79,39 @@ func TestListDir_ContextCancel(t *testing.T) {
 	result, _ := ListDir(ctx, dir, ".", 5)
 	// Should still return something (the root header at minimum)
 	_ = result
+}
+
+func TestListDir_SkipsUnreadableSubtree(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission semantics differ on Windows")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "visible.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	secret := filepath.Join(dir, "secret")
+	if err := os.MkdirAll(secret, 0755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secret, "hidden.txt"), []byte("nope"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := os.Chmod(secret, 0000); err != nil {
+		t.Fatalf("Chmod failed: %v", err)
+	}
+	defer os.Chmod(secret, 0755)
+
+	result, err := ListDir(context.Background(), dir, ".", 2)
+	if err != nil {
+		t.Fatalf("ListDir failed: %v", err)
+	}
+	if !contains(result, "visible.txt") {
+		t.Fatalf("expected readable entries to remain available: %q", result)
+	}
+	if !contains(result, "結果可能不完整") {
+		t.Fatalf("expected incomplete-result warning, got %q", result)
+	}
 }
 
 func contains(s, substr string) bool {

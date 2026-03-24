@@ -15,15 +15,17 @@ import (
 	"time"
 
 	"github.com/garyellow/axle/internal/bot/skill"
+	domainworkflow "github.com/garyellow/axle/internal/domain/workflow"
+	usecaseworkflow "github.com/garyellow/axle/internal/usecase/workflow"
 )
 
 const (
 	workflowFile              = "workflows.json"
-	maxActiveWorkflowsPerUser = 3
-	maxActiveWorkflowsTotal   = 8
+	maxActiveWorkflowsPerUser = domainworkflow.MaxActiveWorkflowsPerUser
+	maxActiveWorkflowsTotal   = domainworkflow.MaxActiveWorkflowsTotal
 )
 
-var ErrWorkflowCapacity = errors.New("workflow capacity reached")
+var ErrWorkflowCapacity = domainworkflow.ErrCapacity
 
 // WorkflowStatus is the lifecycle state of a workflow.
 type WorkflowStatus string
@@ -224,6 +226,9 @@ func (wm *WorkflowManager) StartPlanned(userID int64, request, model, workspace,
 	steps = normalizeWorkflowSteps(steps)
 	if len(steps) == 0 {
 		return nil, fmt.Errorf("工作流至少需要一個步驟")
+	}
+	if err := usecaseworkflow.ValidateSteps(workflowStepsToDomain(steps)); err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -449,48 +454,15 @@ func (wm *WorkflowManager) runStep(ctx context.Context, workflowID string, step 
 		wm.mu.RUnlock()
 		return "", fmt.Errorf("工作流不存在")
 	}
-	model := wf.Model
-	workspace := wf.Workspace
-	depSummary := collectDependencyResults(wf.Steps, step.DependsOn)
+	cp := copyWorkflow(wf)
 	wm.mu.RUnlock()
 
-	switch strings.ToLower(step.Kind) {
-	case "copilot", "":
-		prompt := strings.TrimSpace(step.Prompt)
-		if prompt == "" {
-			prompt = strings.TrimSpace(wf.Request)
-		}
-		if depSummary != "" {
-			prompt = depSummary + "\n\nCurrent step:\n" + prompt
-		}
-		return wm.copilotRunner(ctx, workspace, model, prompt)
-	case "browser":
-		script := strings.TrimSpace(step.Script)
-		if script == "" {
-			return "", fmt.Errorf("browser 步驟缺少 script")
-		}
-		return wm.browserRunner(ctx, workspace, script)
-	default:
-		return "", fmt.Errorf("不支援的工作流步驟類型: %s", step.Kind)
-	}
+	return usecaseworkflow.RunStep(ctx, wm.copilotRunner, wm.browserRunner, workflowToDomain(cp), workflowStepToDomain(step))
 }
 
 func (wm *WorkflowManager) planWorkflow(ctx context.Context, request, model, workspace string) ([]WorkflowStep, string, error) {
-	prompt := buildWorkflowPlannerPrompt(request)
-	raw, err := wm.copilotRunner(ctx, workspace, model, prompt)
-	if err != nil {
-		if ctx.Err() == context.Canceled {
-			return nil, "", context.Canceled
-		}
-		steps := fallbackWorkflowSteps(request)
-		return steps, "fallback", nil
-	}
-
-	steps, err := parseWorkflowPlan(raw)
-	if err != nil || len(steps) == 0 {
-		return fallbackWorkflowSteps(request), raw, nil
-	}
-	return steps, raw, nil
+	steps, raw, err := usecaseworkflow.Plan(ctx, wm.copilotRunner, request, model, workspace)
+	return workflowStepsFromDomain(steps), raw, err
 }
 
 func (wm *WorkflowManager) markStepCompleted(workflowID, stepID, result string) {
@@ -547,11 +519,13 @@ func (wm *WorkflowManager) markStepCancelled(workflowID, stepID string) {
 }
 
 func (wm *WorkflowManager) finishWorkflow(workflowID string, status WorkflowStatus, summary, errMsg, source string) {
-	wm.mu.Lock()
-	defer wm.mu.Unlock()
+	var memoryEntry *MemoryEntry
+	var memoryUserID int64
 
+	wm.mu.Lock()
 	wf, ok := wm.workflows[workflowID]
 	if !ok {
+		wm.mu.Unlock()
 		return
 	}
 	wf.Status = status
@@ -576,17 +550,24 @@ func (wm *WorkflowManager) finishWorkflow(workflowID string, status WorkflowStat
 			if entrySource == "" {
 				entrySource = wf.Source
 			}
-			if err := wm.memory.AddDetailed(wf.UserID, MemoryEntry{
-				Role:      "system",
+			entry := MemoryEntry{
+				Role:      "tool",
 				Content:   content,
 				Model:     wf.Model,
 				Kind:      "workflow",
 				Source:    entrySource,
 				Workspace: wf.Workspace,
 				Tags:      []string{"workflow", workflowID},
-			}); err != nil {
-				slog.Warn("⚠️ 工作流記憶寫入失敗", "workflow_id", workflowID, "user_id", wf.UserID, "error", err)
 			}
+			memoryEntry = &entry
+			memoryUserID = wf.UserID
+		}
+	}
+	wm.mu.Unlock()
+
+	if wm.memory != nil && memoryEntry != nil {
+		if err := wm.memory.AddDetailed(memoryUserID, *memoryEntry); err != nil {
+			slog.Warn("⚠️ 工作流記憶寫入失敗", "workflow_id", workflowID, "user_id", memoryUserID, "error", err)
 		}
 	}
 }
@@ -673,7 +654,10 @@ func copyWorkflow(wf *Workflow) Workflow {
 	cp := *wf
 	cp.cancelFn = nil
 	cp.Steps = make([]WorkflowStep, len(wf.Steps))
-	copy(cp.Steps, wf.Steps)
+	for i, step := range wf.Steps {
+		cp.Steps[i] = step
+		cp.Steps[i].DependsOn = append([]string(nil), step.DependsOn...)
+	}
 	return cp
 }
 
@@ -701,40 +685,15 @@ func (wm *WorkflowManager) ensureCapacityLocked(userID int64) error {
 }
 
 func findReadyStep(steps []WorkflowStep) int {
-	for i, step := range steps {
-		if step.Status != WorkflowStepPending {
-			continue
-		}
-		ready := true
-		for _, dep := range step.DependsOn {
-			if !isStepCompleted(steps, dep) {
-				ready = false
-				break
-			}
-		}
-		if ready {
-			return i
-		}
-	}
-	return -1
+	return domainworkflow.FindReadyStep(workflowStepsToDomain(steps))
 }
 
 func hasPendingSteps(steps []WorkflowStep) bool {
-	for _, step := range steps {
-		if step.Status == WorkflowStepPending {
-			return true
-		}
-	}
-	return false
+	return domainworkflow.HasPendingSteps(workflowStepsToDomain(steps))
 }
 
 func isStepCompleted(steps []WorkflowStep, stepID string) bool {
-	for _, step := range steps {
-		if step.ID == stepID {
-			return step.Status == WorkflowStepCompleted
-		}
-	}
-	return false
+	return domainworkflow.IsStepCompleted(workflowStepsToDomain(steps), stepID)
 }
 
 func collectDependencyResults(steps []WorkflowStep, deps []string) string {
@@ -758,39 +717,11 @@ func collectDependencyResults(steps []WorkflowStep, deps []string) string {
 }
 
 func summarizeWorkflow(wf *Workflow) string {
-	var sb strings.Builder
-	sb.WriteString("📋 結果摘要\n")
-	for _, step := range wf.Steps {
-		sb.WriteString(fmt.Sprintf("• %s — %s\n", step.Name, step.Status.Label()))
-		switch {
-		case step.Result != "":
-			sb.WriteString("  " + truncateStr(strings.ReplaceAll(step.Result, "\n", " "), 180) + "\n")
-		case step.Error != "":
-			sb.WriteString("  " + truncateStr(step.Error, 180) + "\n")
-		}
-	}
-	return strings.TrimSpace(sb.String())
+	return domainworkflow.Summarize(workflowToDomain(*wf))
 }
 
 func normalizeWorkflowSteps(steps []WorkflowStep) []WorkflowStep {
-	result := make([]WorkflowStep, 0, len(steps))
-	for i, step := range steps {
-		if strings.TrimSpace(step.Name) == "" {
-			step.Name = fmt.Sprintf("步驟 %d", i+1)
-		}
-		if strings.TrimSpace(step.ID) == "" {
-			step.ID = fmt.Sprintf("step-%d", i+1)
-		}
-		if step.Status == "" {
-			step.Status = WorkflowStepPending
-		}
-		step.Kind = strings.ToLower(strings.TrimSpace(step.Kind))
-		if step.Kind == "" {
-			step.Kind = "copilot"
-		}
-		result = append(result, step)
-	}
-	return result
+	return workflowStepsFromDomain(domainworkflow.NormalizeSteps(workflowStepsToDomain(steps)))
 }
 
 func buildWorkflowPlannerPrompt(request string) string {
@@ -803,7 +734,7 @@ Rules:
 - Allowed kinds: "copilot" or "browser".
 - Use "browser" only when web inspection is clearly needed.
 - For browser steps, use the Axle browser DSL only:
-  open https://example.com
+  open https://1.1.1.1
   wait 2s
   extract body
   screenshot .axle/browser/example.png
@@ -833,24 +764,79 @@ func fallbackWorkflowSteps(request string) []WorkflowStep {
 }
 
 func parseWorkflowPlan(raw string) ([]WorkflowStep, error) {
-	clean := strings.TrimSpace(raw)
-	clean = strings.TrimPrefix(clean, "```json")
-	clean = strings.TrimPrefix(clean, "```")
-	clean = strings.TrimSuffix(clean, "```")
-	clean = strings.TrimSpace(clean)
-
-	start := strings.Index(clean, "{")
-	end := strings.LastIndex(clean, "}")
-	if start < 0 || end <= start {
-		return nil, fmt.Errorf("找不到 JSON 物件")
-	}
-	clean = clean[start : end+1]
-
-	var env workflowPlanEnvelope
-	if err := json.Unmarshal([]byte(clean), &env); err != nil {
+	steps, err := usecaseworkflow.ParsePlan(raw)
+	if err != nil {
 		return nil, err
 	}
-	return normalizeWorkflowSteps(env.Steps), nil
+	return workflowStepsFromDomain(steps), nil
+}
+
+func workflowToDomain(wf Workflow) domainworkflow.Workflow {
+	return domainworkflow.Workflow{
+		ID:            wf.ID,
+		UserID:        wf.UserID,
+		Source:        wf.Source,
+		Request:       wf.Request,
+		Model:         wf.Model,
+		Workspace:     wf.Workspace,
+		Status:        domainworkflow.Status(wf.Status),
+		CreatedAt:     wf.CreatedAt,
+		DoneAt:        wf.DoneAt,
+		PlanText:      wf.PlanText,
+		Steps:         workflowStepsToDomain(wf.Steps),
+		ResultSummary: wf.ResultSummary,
+		Error:         wf.Error,
+	}
+}
+
+func workflowStepsToDomain(steps []WorkflowStep) []domainworkflow.Step {
+	if len(steps) == 0 {
+		return nil
+	}
+	result := make([]domainworkflow.Step, 0, len(steps))
+	for _, step := range steps {
+		result = append(result, workflowStepToDomain(step))
+	}
+	return result
+}
+
+func workflowStepToDomain(step WorkflowStep) domainworkflow.Step {
+	return domainworkflow.Step{
+		ID:        step.ID,
+		Name:      step.Name,
+		Kind:      step.Kind,
+		Prompt:    step.Prompt,
+		Script:    step.Script,
+		DependsOn: append([]string(nil), step.DependsOn...),
+		Status:    domainworkflow.StepStatus(step.Status),
+		Result:    step.Result,
+		Error:     step.Error,
+		StartedAt: step.StartedAt,
+		DoneAt:    step.DoneAt,
+	}
+}
+
+func workflowStepsFromDomain(steps []domainworkflow.Step) []WorkflowStep {
+	if len(steps) == 0 {
+		return nil
+	}
+	result := make([]WorkflowStep, 0, len(steps))
+	for _, step := range steps {
+		result = append(result, WorkflowStep{
+			ID:        step.ID,
+			Name:      step.Name,
+			Kind:      step.Kind,
+			Prompt:    step.Prompt,
+			Script:    step.Script,
+			DependsOn: append([]string(nil), step.DependsOn...),
+			Status:    WorkflowStepStatus(step.Status),
+			Result:    step.Result,
+			Error:     step.Error,
+			StartedAt: step.StartedAt,
+			DoneAt:    step.DoneAt,
+		})
+	}
+	return result
 }
 
 func defaultWorkflowCopilotRunner(ctx context.Context, workspace, model, prompt string) (string, error) {

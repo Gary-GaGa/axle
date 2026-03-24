@@ -4,13 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
-
-func hasPrefix(path, prefix string) bool {
-	return strings.HasPrefix(path, prefix)
-}
 
 func TestReadCode_Basic(t *testing.T) {
 	dir := t.TempDir()
@@ -38,38 +33,32 @@ func TestReadCode_NonExistent(t *testing.T) {
 
 func TestReadCode_PathEscape(t *testing.T) {
 	dir := t.TempDir()
-	// The sandbox cleans "../" so it stays inside workspace.
-	// Reading a non-existent cleaned path should return "file not found".
 	_, err := ReadCode(context.Background(), dir, "../../../etc/passwd")
 	if err == nil {
-		t.Error("expected error (file not found inside sandbox)")
+		t.Error("expected traversal path to be rejected")
 	}
 }
 
 func TestResolveAndValidate(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "ok.txt"), []byte("ok"), 0644)
+	canonicalDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks failed: %v", err)
+	}
 
 	// Valid path
 	abs, err := resolveAndValidate(dir, "ok.txt")
 	if err != nil {
 		t.Fatalf("resolveAndValidate failed: %v", err)
 	}
-	if abs != filepath.Join(dir, "ok.txt") {
-		t.Errorf("got %s, want %s", abs, filepath.Join(dir, "ok.txt"))
+	if abs != filepath.Join(canonicalDir, "ok.txt") {
+		t.Errorf("got %s, want %s", abs, filepath.Join(canonicalDir, "ok.txt"))
 	}
 
-	// Path escape - "../" is cleaned by sandbox, resulting in workspace-relative path
-	// For "/etc/passwd" as relPath, it becomes "{workspace}/etc/passwd" (inside workspace)
 	abs, err = resolveAndValidate(dir, "../../etc/passwd")
-	if err != nil {
-		// This is OK too — sandbox may reject or clean
-		t.Logf("escape path result: %v (acceptable)", err)
-	} else {
-		// If no error, verify it stayed inside workspace
-		if !hasPrefix(abs, dir) {
-			t.Errorf("resolved path %s escaped workspace %s", abs, dir)
-		}
+	if err == nil {
+		t.Fatalf("expected traversal path to be rejected, got %s", abs)
 	}
 }
 
@@ -101,16 +90,9 @@ func TestWriteFile_CreateSubdirs(t *testing.T) {
 
 func TestWriteFile_PathEscape(t *testing.T) {
 	dir := t.TempDir()
-	// "../escape.txt" is cleaned to "escape.txt" inside workspace, so write succeeds
 	err := WriteFile(dir, "../escape.txt", "test")
-	if err != nil {
-		// Sandbox rejected — acceptable
-		t.Logf("write escape result: %v (acceptable)", err)
-	} else {
-		// Verify file is inside workspace
-		if _, statErr := os.Stat(filepath.Join(dir, "escape.txt")); statErr != nil {
-			t.Logf("file not at expected location — sandbox redirected")
-		}
+	if err == nil {
+		t.Fatal("expected traversal path to be rejected")
 	}
 }
 
@@ -135,5 +117,93 @@ func TestFileExists(t *testing.T) {
 	exists, err = FileExists(dir, "nope.txt")
 	if err != nil || exists {
 		t.Error("expected file to not exist")
+	}
+}
+
+func TestFileExists_Directory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "notes"), 0755); err != nil {
+		t.Fatalf("Mkdir failed: %v", err)
+	}
+
+	exists, err := FileExists(dir, "notes")
+	if err != nil || !exists {
+		t.Fatalf("expected directory path to exist, got exists=%v err=%v", exists, err)
+	}
+}
+
+func TestFileExistsDetailed_RejectsTraversalPath(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "escape.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	if _, err := FileExistsDetailed(context.Background(), dir, "../escape.txt"); err == nil {
+		t.Fatal("expected traversal path to be rejected")
+	}
+}
+
+func TestReadCode_RejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	os.WriteFile(outside, []byte("secret"), 0644)
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("Symlink failed: %v", err)
+	}
+
+	if _, err := ReadCode(context.Background(), dir, "link.txt"); err == nil {
+		t.Fatal("expected symlink read to be rejected")
+	}
+}
+
+func TestWriteFile_RejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	os.WriteFile(outside, []byte("secret"), 0644)
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatalf("Symlink failed: %v", err)
+	}
+
+	if err := WriteFile(dir, "link.txt", "nope"); err == nil {
+		t.Fatal("expected symlink write to be rejected")
+	}
+}
+
+func TestWriteFile_RejectsHardLink(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := os.Link(outside, filepath.Join(dir, "hard.txt")); err != nil {
+		t.Skipf("hard links unsupported: %v", err)
+	}
+
+	if err := WriteFile(dir, "hard.txt", "nope"); err == nil {
+		t.Fatal("expected hard link write to be rejected")
+	}
+}
+
+func TestWriteFileDetailed_RejectsTraversalPath(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := WriteFileDetailed(context.Background(), dir, "../escape.txt", "hello"); err == nil {
+		t.Fatal("expected traversal path to be rejected")
+	}
+}
+
+func TestFileExists_RejectsHardLink(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("secret"), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	if err := os.Link(outside, filepath.Join(dir, "hard.txt")); err != nil {
+		t.Skipf("hard links unsupported: %v", err)
+	}
+
+	if _, err := FileExists(dir, "hard.txt"); err == nil {
+		t.Fatal("expected hard link existence check to be rejected")
 	}
 }

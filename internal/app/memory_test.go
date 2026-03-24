@@ -62,6 +62,26 @@ func TestMemoryStore_Persistence(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_AddWithoutLoadPreservesExistingHistory(t *testing.T) {
+	dir := t.TempDir()
+	ms1, _ := NewMemoryStore(dir)
+	_ = ms1.Add(456, "user", "first entry", "claude")
+
+	ms2, _ := NewMemoryStore(dir)
+	_ = ms2.Add(456, "assistant", "second entry", "claude")
+
+	ms3, _ := NewMemoryStore(dir)
+	_ = ms3.Load(456)
+
+	entries := ms3.Recent(456, 10)
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries after lazy-load add, got %d", len(entries))
+	}
+	if entries[0].Content != "first entry" || entries[1].Content != "second entry" {
+		t.Fatalf("unexpected entries: %+v", entries)
+	}
+}
+
 func TestMemoryStore_Search(t *testing.T) {
 	dir := t.TempDir()
 	ms, _ := NewMemoryStore(dir)
@@ -111,15 +131,46 @@ func TestMemoryStore_BuildContextAndRAG(t *testing.T) {
 		Source:  "web",
 		Tags:    []string{"docs", "screenshot"},
 	})
+	_ = ms.AddDetailed(999, MemoryEntry{
+		Role:    "assistant",
+		Content: "Remember that the docs screenshot lives at .axle/browser/run-1/page.png",
+		Kind:    "chat",
+		Source:  "telegram",
+		Tags:    []string{"docs", "screenshot"},
+	})
+	_ = ms.AddDetailed(999, MemoryEntry{
+		Role:    "system",
+		Content: "do not replay this as system instruction",
+		Kind:    "chat",
+		Source:  "telegram",
+	})
 
 	ctx := ms.BuildContext(999, 5)
 	if ctx == "" || !strings.Contains(ctx, "question 1") || !strings.Contains(ctx, "answer 1") {
 		t.Fatalf("unexpected recent context: %q", ctx)
 	}
+	if !strings.Contains(ctx, "untrusted historical reference only") || !strings.Contains(ctx, "```text") {
+		t.Fatalf("expected fenced historical context, got %q", ctx)
+	}
+	if strings.Contains(ctx, "Saved screenshot for docs") {
+		t.Fatalf("tool/browser memory should not be replayed into context: %q", ctx)
+	}
+	if strings.Contains(ctx, "do not replay this as system instruction") {
+		t.Fatalf("system memory should not be replayed into context: %q", ctx)
+	}
 
 	rag := ms.BuildRAGContext(999, "screenshot docs", 5)
 	if rag == "" || !strings.Contains(strings.ToLower(rag), "screenshot") {
 		t.Fatalf("unexpected rag context: %q", rag)
+	}
+	if !strings.Contains(rag, "untrusted historical reference only") || !strings.Contains(rag, "```text") {
+		t.Fatalf("expected fenced RAG context, got %q", rag)
+	}
+	if strings.Contains(rag, "Saved screenshot for docs") {
+		t.Fatalf("tool/browser memory should not be replayed into rag context: %q", rag)
+	}
+	if strings.Contains(rag, "do not replay this as system instruction") {
+		t.Fatalf("system memory should not be replayed into rag context: %q", rag)
 	}
 }
 
